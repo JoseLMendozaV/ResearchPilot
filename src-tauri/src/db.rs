@@ -63,7 +63,14 @@ const MIGRATIONS: &[(i64, &str, &str)] = &[
         "synthesis drafts",
         include_str!("../migrations/0010_synthesis.sql"),
     ),
+    (
+        11,
+        "collaboration and expansion",
+        include_str!("../migrations/0011_collaboration.sql"),
+    ),
 ];
+/// Latest schema version this build understands (used by backups and exchange packages).
+pub(crate) const SCHEMA_VERSION: i64 = MIGRATIONS[MIGRATIONS.len() - 1].0;
 const REVIEW_TYPES: [&str; 3] = ["systematic_review", "systematic_mapping", "scoping_review"];
 
 #[derive(Debug, Clone)]

@@ -58,14 +58,20 @@ impl Database {
             .collect())
     }
 
-    fn import_pdf(&self, source_path: &str) -> AppResult<ImportOutcome> {
+    pub(crate) fn import_pdf(&self, source_path: &str) -> AppResult<ImportOutcome> {
         let source = fs::canonicalize(source_path)?;
         validate_pdf(&source)?;
         let hash = sha256_file(&source)?;
 
-        if let Some(article) = self.article_by_hash(&hash)? {
-            return Ok(ImportOutcome::Duplicate(article));
-        }
+        // A metadata-only record that already knows this file's hash (for example one
+        // received in an exchange package) gets the PDF attached instead of a duplicate.
+        let attach_to = match self.article_by_hash(&hash)? {
+            Some(article) if article.document_path.is_some() => {
+                return Ok(ImportOutcome::Duplicate(article));
+            }
+            Some(article) => Some(article.id),
+            None => None,
+        };
 
         let metadata = Document::load_metadata(&source)
             .map_err(|error| AppError::Validation(format!("PDF ilegible o corrupto: {error}")))?;
@@ -78,7 +84,9 @@ impl Database {
             AppError::Validation(format!("No se pudo procesar el PDF: {error}"))
         })?;
 
-        let article_id = Uuid::new_v4().to_string();
+        let article_id = attach_to
+            .clone()
+            .unwrap_or_else(|| Uuid::new_v4().to_string());
         let document_id = Uuid::new_v4().to_string();
         let job_id = Uuid::new_v4().to_string();
         let article_dir = self.storage_dir.join("library").join(&article_id);
@@ -114,25 +122,32 @@ impl Database {
         let import_result = (|| -> AppResult<()> {
             let mut connection = self.open()?;
             let transaction = connection.transaction()?;
-            transaction.execute(
-                "INSERT INTO articles (
+            if attach_to.is_some() {
+                transaction.execute(
+                    "UPDATE articles SET pdf_path = ?1, updated_at = ?2 WHERE id = ?3",
+                    params![destination.to_string_lossy(), timestamp, article_id],
+                )?;
+            } else {
+                transaction.execute(
+                    "INSERT INTO articles (
                     id, title, abstract_text, publication_year, authors_json, keywords_json,
                     pdf_path, document_sha256, metadata_source, created_at, updated_at
                  ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 'pdf_metadata', ?9, ?9)",
-                params![
-                    article_id,
-                    title.trim(),
-                    metadata.subject.filter(|value| !value.trim().is_empty()),
-                    publication_year,
-                    serde_json::to_string(&authors)
-                        .map_err(|error| AppError::Initialization(error.to_string()))?,
-                    serde_json::to_string(&keywords)
-                        .map_err(|error| AppError::Initialization(error.to_string()))?,
-                    destination.to_string_lossy(),
-                    hash,
-                    timestamp,
-                ],
-            )?;
+                    params![
+                        article_id,
+                        title.trim(),
+                        metadata.subject.filter(|value| !value.trim().is_empty()),
+                        publication_year,
+                        serde_json::to_string(&authors)
+                            .map_err(|error| AppError::Initialization(error.to_string()))?,
+                        serde_json::to_string(&keywords)
+                            .map_err(|error| AppError::Initialization(error.to_string()))?,
+                        destination.to_string_lossy(),
+                        hash,
+                        timestamp,
+                    ],
+                )?;
+            }
             transaction.execute(
                 "INSERT INTO document_files (
                     id, article_id, original_path, file_name, sha256, byte_size,
@@ -192,12 +207,13 @@ impl Database {
             transaction.execute(
                 "INSERT INTO audit_events (
                     id, entity_type, entity_id, action, actor_type, actor_name, after_json, created_at
-                 ) VALUES (?1, 'article', ?2, 'imported', 'import', 'pdf-importer', ?3, ?4)",
+                 ) VALUES (?1, 'article', ?2, ?5, 'import', 'pdf-importer', ?3, ?4)",
                 params![
                     Uuid::new_v4().to_string(),
                     article_id,
                     serde_json::json!({ "sha256": hash, "fileName": file_name }).to_string(),
                     now(),
+                    if attach_to.is_some() { "pdf_attached" } else { "imported" },
                 ],
             )?;
             transaction.commit()?;
@@ -421,7 +437,7 @@ impl Database {
     }
 }
 
-enum ImportOutcome {
+pub(crate) enum ImportOutcome {
     Imported(LibraryArticle),
     Duplicate(LibraryArticle),
 }

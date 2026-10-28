@@ -22,12 +22,22 @@ pub const WORKER_VERSION: &str = "0.3.0";
 pub const PROTOCOL_VERSION: i64 = 1;
 pub const RULESET_VERSION: &str = "rules-v1";
 
+// Interpreter and tool locations per platform. Only macOS is built and tested;
+// Linux and Windows values are prepared for future ports.
+#[cfg(target_os = "macos")]
 const SEARCH_PATH: &str = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin";
-const SYSTEM_PYTHONS: [&str; 3] = [
+#[cfg(target_os = "macos")]
+const SYSTEM_PYTHONS: &[&str] = &[
     "/opt/homebrew/bin/python3",
     "/usr/local/bin/python3",
     "/usr/bin/python3",
 ];
+#[cfg(all(unix, not(target_os = "macos")))]
+const SEARCH_PATH: &str = "/usr/local/bin:/usr/bin:/bin";
+#[cfg(all(unix, not(target_os = "macos")))]
+const SYSTEM_PYTHONS: &[&str] = &["/usr/bin/python3", "/usr/local/bin/python3"];
+#[cfg(windows)]
+const SYSTEM_PYTHONS: &[&str] = &[];
 
 #[derive(Debug, Clone)]
 pub struct WorkerEnvironment {
@@ -48,7 +58,7 @@ pub struct PythonChoice {
 
 impl WorkerEnvironment {
     pub fn app_env_python(&self) -> PathBuf {
-        self.app_env_dir.join("bin").join("python3")
+        venv_python(&self.app_env_dir)
     }
 
     pub fn worker_present(&self) -> bool {
@@ -150,26 +160,78 @@ impl WorkerEnvironment {
     }
 }
 
+/// Interpreter inside a virtual environment created by `python -m venv`.
+pub fn venv_python(venv: &Path) -> PathBuf {
+    if cfg!(windows) {
+        venv.join("Scripts").join("python.exe")
+    } else {
+        venv.join("bin").join("python3")
+    }
+}
+
 pub fn system_python() -> Option<PathBuf> {
-    SYSTEM_PYTHONS.iter().map(PathBuf::from).find(|path| {
+    let mut candidates: Vec<PathBuf> = SYSTEM_PYTHONS.iter().map(PathBuf::from).collect();
+    if cfg!(windows) {
+        candidates.extend(windows_pythons());
+    }
+    candidates.into_iter().find(|path| {
         if !path.is_file() {
             return false;
         }
-        // /usr/bin/python3 is a shim that opens an installer dialog when the
+        // macOS: /usr/bin/python3 is a shim that opens an installer dialog when the
         // Command Line Tools are missing; only use it when they are present.
-        path != Path::new("/usr/bin/python3")
+        !cfg!(target_os = "macos")
+            || path != Path::new("/usr/bin/python3")
             || Path::new("/Library/Developer/CommandLineTools/usr/bin/python3").is_file()
             || Path::new("/Applications/Xcode.app").is_dir()
     })
 }
 
+/// python.org installs per user: `%LOCALAPPDATA%\Programs\Python\Python3xx\python.exe`,
+/// newest first.
+fn windows_pythons() -> Vec<PathBuf> {
+    let Some(local) = std::env::var_os("LOCALAPPDATA") else {
+        return Vec::new();
+    };
+    let root = PathBuf::from(local).join("Programs").join("Python");
+    let mut found: Vec<PathBuf> = std::fs::read_dir(root)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .map(|entry| entry.path())
+        .filter(|path| {
+            path.file_name()
+                .is_some_and(|name| name.to_string_lossy().starts_with("Python3"))
+        })
+        .map(|path| path.join("python.exe"))
+        .collect();
+    found.sort();
+    found.reverse();
+    found
+}
+
 pub fn isolate_environment(command: &mut Command) {
     command
         .env_clear()
-        .env("PATH", SEARCH_PATH)
         .env("LANG", "en_US.UTF-8")
         .env("PYTHONIOENCODING", "utf-8");
-    for key in ["HOME", "TMPDIR"] {
+    #[cfg(unix)]
+    command.env("PATH", SEARCH_PATH);
+    // Windows needs its system variables to start any process.
+    let kept: &[&str] = if cfg!(windows) {
+        &[
+            "PATH",
+            "SYSTEMROOT",
+            "USERPROFILE",
+            "TEMP",
+            "TMP",
+            "LOCALAPPDATA",
+            "APPDATA",
+        ]
+    } else {
+        &["HOME", "TMPDIR"]
+    };
+    for key in kept {
         if let Some(value) = std::env::var_os(key) {
             command.env(key, value);
         }

@@ -21,7 +21,7 @@ type Scores = HashMap<String, (f64, String)>;
 type ScoresByActor = HashMap<String, Scores>;
 
 /// Actor name of the final (consensus) scores.
-const CONSENSUS: &str = "__consenso__";
+pub(crate) const CONSENSUS: &str = "__consenso__";
 
 fn require(condition: bool, message: &str) -> AppResult<()> {
     if condition {
@@ -408,7 +408,10 @@ impl Database {
     }
 }
 
-fn quality_criteria(connection: &Connection, project_id: &str) -> AppResult<Vec<QualityCriterion>> {
+pub(crate) fn quality_criteria(
+    connection: &Connection,
+    project_id: &str,
+) -> AppResult<Vec<QualityCriterion>> {
     let mut statement = connection.prepare(
         "SELECT id, code, question, description, weight, scale_json, max_score FROM quality_criteria WHERE project_id = ?1 ORDER BY display_order, code",
     )?;
@@ -545,7 +548,7 @@ fn assess(name: &str, scores: Scores, criteria: &[QualityCriterion], policy: &st
 }
 
 /// Two complete, identical assessments become the consensus; any difference opens a conflict.
-fn reconcile(
+pub(crate) fn reconcile(
     connection: &Connection,
     project_id: &str,
     article_id: &str,

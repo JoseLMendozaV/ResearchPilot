@@ -62,3 +62,10 @@ erDiagram
 - `assistant_conversations` / `assistant_messages`: las citas se guardan como copia (artículo, página, cita, caja), de modo que el historial no depende de que el fragmento siga existiendo.
 - `ai_runs`: cada llamada a un modelo con versión de prompt, hashes, tokens, duración, intentos y estado.
 - Las propuestas de IA usan `master_record_values` con `origin = 'ai'`; cada origen (reglas o IA) solo reemplaza sus propias propuestas no revisadas.
+
+## Colaboración y expansión (Fase 9)
+
+- `external_links (source, external_key, article_id, metadata_json)`: vínculo idempotente con bibliotecas externas (hoy `zotero`, clave `libraryID:key`).
+- `exchange_imports (project_id, package_sha256 UNIQUE, origin_reviewer_*, summary_json)`: paquetes de intercambio aplicados; reimportar el mismo paquete no cambia nada.
+- `reviewer_conflicts.conflict_type = 'extraction'`: `details_json` guarda `fieldId`, `fieldName` y los valores en disputa (`valueId`, revisor, valor).
+- Los respaldos no viven en la base: son archivos zip con `manifest.json` (`researchpilot-backup/1`) y una auditoría `backup/created` o `backup/restored`.

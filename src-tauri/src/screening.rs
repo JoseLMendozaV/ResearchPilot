@@ -235,46 +235,7 @@ impl Database {
         )?;
         let connection = self.open()?;
         ensure_project(&connection, project_id)?;
-        // Full text only considers articles that passed the metadata screening.
-        let stage_filter = if phase == "full_text" {
-            "AND (r.workflow_stage IN ('eligible', 'included') OR EXISTS(SELECT 1 FROM screening_decisions d WHERE d.project_id = r.project_id AND d.article_id = r.article_id AND d.phase = 'full_text'))"
-        } else {
-            ""
-        };
-        let mut statement = connection.prepare(&format!(
-            "SELECT a.id, r.sequence, a.title, a.authors_json, a.publication_year, a.venue, a.doi, a.keywords_json, a.abstract_text,
-                    r.workflow_stage, r.is_secondary, r.source_database, a.pdf_path IS NOT NULL,
-                    (SELECT id FROM reviewer_conflicts c WHERE c.project_id = r.project_id AND c.article_id = a.id AND c.conflict_type = 'screening' AND c.phase = ?2 AND c.status = 'open' LIMIT 1)
-             FROM review_articles r JOIN articles a ON a.id = r.article_id
-             WHERE r.project_id = ?1 AND r.removed_at IS NULL AND a.deleted_at IS NULL {stage_filter}
-             ORDER BY r.sequence"
-        ))?;
-        let mut rows: Vec<ScreeningRow> = statement
-            .query_map(params![project_id, phase], |row| {
-                Ok(ScreeningRow {
-                    article_id: row.get(0)?,
-                    sequence: row.get::<_, Option<i64>>(1)?.unwrap_or(0),
-                    title: row.get(2)?,
-                    authors: serde_json::from_str(&row.get::<_, String>(3)?).unwrap_or_default(),
-                    year: row.get(4)?,
-                    venue: row.get(5)?,
-                    doi: row.get(6)?,
-                    keywords: serde_json::from_str(&row.get::<_, String>(7)?).unwrap_or_default(),
-                    abstract_text: row.get(8)?,
-                    stage: row.get(9)?,
-                    is_secondary: row.get(10)?,
-                    source_database: row.get(11)?,
-                    has_pdf: row.get(12)?,
-                    reviews: Vec::new(),
-                    final_decision: None,
-                    conflict_id: row.get(13)?,
-                })
-            })?
-            .collect::<Result<_, _>>()?;
-        for row in &mut rows {
-            row.reviews = latest_reviews(&connection, project_id, &row.article_id, phase)?;
-            row.final_decision = final_decision(&connection, project_id, &row.article_id, phase)?;
-        }
+        let rows = screening_rows(&connection, project_id, phase, None)?;
         let decided = rows
             .iter()
             .filter(|row| row.final_decision.is_some())
@@ -454,12 +415,65 @@ impl Database {
         article_id: &str,
         phase: &str,
     ) -> AppResult<ScreeningRow> {
-        self.screening_table(project_id, phase)?
-            .rows
+        require(
+            ["metadata", "full_text"].contains(&phase),
+            "Fase de cribado no reconocida",
+        )?;
+        screening_rows(&self.open()?, project_id, phase, Some(article_id))?
             .into_iter()
-            .find(|row| row.article_id == article_id)
+            .next()
             .ok_or_else(|| AppError::Validation("El artículo ya no aparece en esta fase".into()))
     }
+}
+
+/// Rows of a screening phase; `article_id` limits it to one study.
+fn screening_rows(
+    connection: &Connection,
+    project_id: &str,
+    phase: &str,
+    article_id: Option<&str>,
+) -> AppResult<Vec<ScreeningRow>> {
+    // Full text only considers articles that passed the metadata screening.
+    let stage_filter = if phase == "full_text" {
+        "AND (r.workflow_stage IN ('eligible', 'included') OR EXISTS(SELECT 1 FROM screening_decisions d WHERE d.project_id = r.project_id AND d.article_id = r.article_id AND d.phase = 'full_text'))"
+    } else {
+        ""
+    };
+    let mut statement = connection.prepare(&format!(
+            "SELECT a.id, r.sequence, a.title, a.authors_json, a.publication_year, a.venue, a.doi, a.keywords_json, a.abstract_text,
+                    r.workflow_stage, r.is_secondary, r.source_database, a.pdf_path IS NOT NULL,
+                    (SELECT id FROM reviewer_conflicts c WHERE c.project_id = r.project_id AND c.article_id = a.id AND c.conflict_type = 'screening' AND c.phase = ?2 AND c.status = 'open' LIMIT 1)
+             FROM review_articles r JOIN articles a ON a.id = r.article_id
+             WHERE r.project_id = ?1 AND (?3 IS NULL OR r.article_id = ?3) AND r.removed_at IS NULL AND a.deleted_at IS NULL {stage_filter}
+             ORDER BY r.sequence"
+        ))?;
+    let mut rows: Vec<ScreeningRow> = statement
+        .query_map(params![project_id, phase, article_id], |row| {
+            Ok(ScreeningRow {
+                article_id: row.get(0)?,
+                sequence: row.get::<_, Option<i64>>(1)?.unwrap_or(0),
+                title: row.get(2)?,
+                authors: serde_json::from_str(&row.get::<_, String>(3)?).unwrap_or_default(),
+                year: row.get(4)?,
+                venue: row.get(5)?,
+                doi: row.get(6)?,
+                keywords: serde_json::from_str(&row.get::<_, String>(7)?).unwrap_or_default(),
+                abstract_text: row.get(8)?,
+                stage: row.get(9)?,
+                is_secondary: row.get(10)?,
+                source_database: row.get(11)?,
+                has_pdf: row.get(12)?,
+                reviews: Vec::new(),
+                final_decision: None,
+                conflict_id: row.get(13)?,
+            })
+        })?
+        .collect::<Result<_, _>>()?;
+    for row in &mut rows {
+        row.reviews = latest_reviews(connection, project_id, &row.article_id, phase)?;
+        row.final_decision = final_decision(connection, project_id, &row.article_id, phase)?;
+    }
+    Ok(rows)
 }
 
 fn criteria(connection: &Connection, project_id: &str) -> AppResult<Vec<Criterion>> {
@@ -552,7 +566,7 @@ fn final_decision(
 }
 
 /// Double review: agreement finalizes; disagreement opens a conflict.
-fn reconcile(
+pub(crate) fn reconcile(
     connection: &Connection,
     project_id: &str,
     article_id: &str,

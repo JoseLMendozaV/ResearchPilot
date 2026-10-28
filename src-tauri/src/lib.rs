@@ -1,8 +1,10 @@
 mod ai_fields;
 mod ai_gateway;
+mod backup;
 mod bibliography;
 mod db;
 mod error;
+mod exchange;
 mod export;
 mod extraction;
 mod indexing;
@@ -18,6 +20,10 @@ mod screening;
 mod secrets;
 mod synthesis;
 mod worker;
+mod zotero;
+
+#[cfg(test)]
+mod perf_tests;
 
 use std::{
     collections::HashMap,
@@ -989,6 +995,124 @@ fn worker_environment(
     })
 }
 
+// --- Phase 9: backup, exchange and Zotero -------------------------------------------
+
+/// Outcome of a restore applied at start-up, shown once by the interface.
+#[derive(Default)]
+struct RestoreNotice(std::sync::Mutex<Option<serde_json::Value>>);
+
+async fn blocking<T: Send + 'static>(
+    task: impl FnOnce() -> AppResult<T> + Send + 'static,
+) -> AppResult<T> {
+    tauri::async_runtime::spawn_blocking(task)
+        .await
+        .map_err(|error| AppError::Validation(error.to_string()))?
+}
+
+#[tauri::command]
+async fn create_backup(
+    database: State<'_, Database>,
+    path: String,
+) -> AppResult<backup::BackupResult> {
+    let database = database.inner().clone();
+    blocking(move || database.create_backup(std::path::Path::new(&path))).await
+}
+
+#[tauri::command]
+async fn inspect_backup(
+    database: State<'_, Database>,
+    path: String,
+) -> AppResult<backup::BackupInfo> {
+    let database = database.inner().clone();
+    blocking(move || database.inspect_backup(std::path::Path::new(&path))).await
+}
+
+#[tauri::command]
+async fn stage_restore(
+    database: State<'_, Database>,
+    path: String,
+) -> AppResult<backup::BackupInfo> {
+    let database = database.inner().clone();
+    blocking(move || database.stage_restore(std::path::Path::new(&path))).await
+}
+
+#[tauri::command]
+fn cancel_restore(database: State<'_, Database>) -> AppResult<()> {
+    database.cancel_restore()
+}
+
+#[tauri::command]
+async fn database_diagnostics(database: State<'_, Database>) -> AppResult<backup::Diagnostics> {
+    let database = database.inner().clone();
+    blocking(move || database.diagnostics()).await
+}
+
+#[tauri::command]
+fn take_restore_notice(notice: State<'_, RestoreNotice>) -> Option<serde_json::Value> {
+    notice.0.lock().ok().and_then(|mut value| value.take())
+}
+
+#[tauri::command]
+async fn export_exchange_package(
+    database: State<'_, Database>,
+    project_id: String,
+    path: String,
+) -> AppResult<exchange::ExchangeExportResult> {
+    let database = database.inner().clone();
+    blocking(move || database.export_exchange_package(&project_id, std::path::Path::new(&path)))
+        .await
+}
+
+#[tauri::command]
+async fn import_exchange_package(
+    database: State<'_, Database>,
+    path: String,
+) -> AppResult<exchange::ExchangeImportSummary> {
+    let database = database.inner().clone();
+    blocking(move || database.import_exchange_package(std::path::Path::new(&path))).await
+}
+
+#[tauri::command]
+fn exchange_history(
+    database: State<'_, Database>,
+    project_id: String,
+) -> AppResult<Vec<serde_json::Value>> {
+    database.exchange_history(&project_id)
+}
+
+#[tauri::command]
+fn resolve_extraction_conflict(
+    database: State<'_, Database>,
+    conflict_id: String,
+    keep_value_id: String,
+    reason: String,
+) -> AppResult<()> {
+    database.resolve_extraction_conflict(&conflict_id, &keep_value_id, &reason)
+}
+
+#[tauri::command]
+fn zotero_default_dir() -> Option<String> {
+    zotero::default_data_dir().map(|path| path.to_string_lossy().into_owned())
+}
+
+#[tauri::command]
+async fn import_zotero(
+    database: State<'_, Database>,
+    runner: State<'_, JobRunner>,
+    data_dir: String,
+    include_pdfs: bool,
+) -> AppResult<zotero::ZoteroImportSummary> {
+    let worker = database.inner().clone();
+    let summary =
+        blocking(move || worker.import_zotero(std::path::Path::new(&data_dir), include_pdfs))
+            .await?;
+    if !summary.new_pdf_articles.is_empty() && database.settings()?.auto_extract_on_import {
+        database.enqueue_extractions(&summary.new_pdf_articles, false)?;
+        runner.wake();
+    }
+    Ok(summary)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -1001,7 +1125,19 @@ pub fn run() {
                 .path()
                 .app_data_dir()
                 .map_err(|error| AppError::Initialization(error.to_string()))?;
-            let database = Database::initialize(app_data_dir.join("researchpilot.sqlite3"))?;
+            // A restore staged in the previous session is swapped in before opening.
+            let restore = backup::apply_pending_restore(&app_data_dir);
+            let database = Database::initialize(app_data_dir.join(backup::DATABASE_FILE))?;
+            let notice = match restore {
+                Ok(Some(outcome)) => {
+                    backup::record_restore(&database, &outcome)?;
+                    Some(serde_json::json!({ "status": "restored", "outcome": outcome }))
+                }
+                Ok(None) => None,
+                Err(error) => {
+                    Some(serde_json::json!({ "status": "failed", "message": error.to_string() }))
+                }
+            };
             let handle = app.handle().clone();
             let runner = JobRunner::new(
                 database.clone(),
@@ -1015,6 +1151,7 @@ pub fn run() {
             app.manage(runner);
             app.manage(AssistantRequests::default());
             app.manage(Secrets(Arc::new(KeychainStore)));
+            app.manage(RestoreNotice(std::sync::Mutex::new(notice)));
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -1103,6 +1240,18 @@ pub fn run() {
             list_master_fields,
             export_project,
             export_history,
+            create_backup,
+            inspect_backup,
+            stage_restore,
+            cancel_restore,
+            database_diagnostics,
+            take_restore_notice,
+            export_exchange_package,
+            import_exchange_package,
+            exchange_history,
+            resolve_extraction_conflict,
+            zotero_default_dir,
+            import_zotero,
             prisma_counts,
             prisma_svg,
             project_synthesis,

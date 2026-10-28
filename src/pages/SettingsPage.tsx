@@ -1,8 +1,10 @@
 import { FormEvent, useCallback, useEffect, useState } from "react";
-import { Check, Cloud, Database, Download, HardDrive, LoaderCircle, RefreshCw, ScanText, ShieldCheck, Sparkles, TriangleAlert } from "lucide-react";
+import { ArchiveRestore, Check, Cloud, Database, Download, HardDrive, LibraryBig, LoaderCircle, RefreshCw, ScanText, ShieldCheck, Sparkles, TriangleAlert } from "lucide-react";
 import { AiSettings } from "../components/settings/AiSettings";
+import { BackupSection } from "../components/settings/BackupSection";
 import { ExternalLogPanel, ExternalProviders } from "../components/settings/ExternalProviders";
 import { UpdatesSection } from "../components/settings/UpdatesSection";
+import { ZoteroSection } from "../components/settings/ZoteroSection";
 import { backend, errorMessage } from "../lib/backend";
 import { onJobChanged } from "../lib/events";
 import { jobStatusLabels } from "../lib/extraction";
@@ -12,9 +14,10 @@ interface Props {
   settings: AppSettings;
   databasePath: string;
   saveSettings: (settings: AppSettings) => Promise<AppSettings>;
+  onLibraryChanged?: () => void;
 }
 
-export function SettingsPage({ settings, databasePath, saveSettings }: Props) {
+export function SettingsPage({ settings, databasePath, saveSettings, onLibraryChanged }: Props) {
   const [form, setForm] = useState(settings);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
@@ -122,6 +125,14 @@ export function SettingsPage({ settings, databasePath, saveSettings }: Props) {
 
       <SettingsSection icon={RefreshCw} title="Actualizaciones" description="Versiones publicadas en GitHub, firmadas y verificadas antes de instalarse.">
         <UpdatesSection checkOnStart={form.checkUpdatesOnStart} onCheckOnStartChange={(value) => setForm({ ...form, checkUpdatesOnStart: value })} />
+      </SettingsSection>
+
+      <SettingsSection icon={LibraryBig} title="Importar desde Zotero" description="Metadatos, PDF adjuntos y colecciones de tu biblioteca local de Zotero.">
+        <ZoteroSection onImported={onLibraryChanged} />
+      </SettingsSection>
+
+      <SettingsSection icon={ArchiveRestore} title="Respaldo y recuperación" description="Copia completa y verificable de tus datos; restauración segura al reiniciar.">
+        <BackupSection />
       </SettingsSection>
 
       <SettingsSection icon={Database} title="Almacenamiento" description="Base persistente administrada por el núcleo Rust.">

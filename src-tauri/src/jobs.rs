@@ -651,7 +651,7 @@ impl JobRunner {
             Some("Descargando pdfplumber desde PyPI (requiere internet una sola vez)"),
         )?;
         self.notify(&job.id);
-        let mut pip = Command::new(partial.join("bin").join("python3"));
+        let mut pip = Command::new(worker::venv_python(&partial));
         pip.args([
             "-m",
             "pip",

@@ -3,6 +3,7 @@ import { Plus, Save } from "lucide-react";
 import { reviewBackend } from "../../lib/reviewBackend";
 import type { ProjectSettingsInput, ProjectWorkspace } from "../../reviewTypes";
 import type { LibraryArticle } from "../../types";
+import { ExchangeCard } from "./ExchangeCard";
 import { Card, ErrorNote, stageLabels, useAction } from "./shared";
 
 export function OverviewTab({ workspace, onChange, articles }: { workspace: ProjectWorkspace; onChange: (next: ProjectWorkspace) => void; articles: LibraryArticle[] }) {
@@ -100,6 +101,7 @@ export function OverviewTab({ workspace, onChange, articles }: { workspace: Proj
           </div>
           <p className="mt-2 text-[11px] leading-4 text-slate-400">La colaboración en tiempo real no está disponible: las decisiones de otro revisor se registran seleccionándolo en «Registrando como» (por ejemplo, al transcribir su hoja).</p>
         </Card>
+        <ExchangeCard projectId={project.id} projectName={project.name} onImported={async () => { onChange(await reviewBackend.workspace(project.id)); }} />
         <Card title="Agregar desde la biblioteca" actions={<button className="button-secondary px-3 py-1.5 text-[11px]" disabled={!selected.length || action.busy} onClick={() => void addArticles()}>Añadir {selected.length || ""}</button>}>
           <div className="max-h-72 space-y-1 overflow-y-auto">
             {articles.map((article) => (

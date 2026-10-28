@@ -260,7 +260,15 @@ export interface ConflictInfo {
   conflictType: "screening" | "quality" | "extraction";
   phase?: string;
   status: "open" | "resolved";
-  details: { decisions?: { reviewer: string; decision: Decision; reason: string }[]; criteria?: string[]; reviewers?: string[] };
+  details: {
+    decisions?: { reviewer: string; decision: Decision; reason: string }[];
+    criteria?: string[];
+    reviewers?: string[];
+    // Extraction conflicts: the differing values of one field.
+    fieldId?: string;
+    fieldName?: string;
+    values?: { valueId: string; reviewer: string; value: unknown }[];
+  };
   resolution?: string;
   createdAt: string;
   resolvedAt?: string;

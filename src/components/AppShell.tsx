@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
 import { useI18n, type MessageKey } from "../i18n/I18nProvider";
+import type { RestoreNotice } from "../lib/maintenance";
 import { AppLogo } from "./AppLogo";
 
 const navigation = [
@@ -34,7 +35,7 @@ const titles: Record<string, { title: MessageKey; subtitle: MessageKey }> = {
   "/configuracion": { title: "header.settings.title", subtitle: "header.settings.subtitle" },
 };
 
-export function AppShell({ updateVersion }: { updateVersion?: string | null }) {
+export function AppShell({ updateVersion, restoreNotice, onDismissRestoreNotice }: { updateVersion?: string | null; restoreNotice?: RestoreNotice | null; onDismissRestoreNotice?: () => void }) {
   const location = useLocation();
   const heading = location.pathname.startsWith("/biblioteca/")
     ? { title: "header.library.title" as MessageKey, subtitle: "header.library.subtitle" as MessageKey }
@@ -104,6 +105,16 @@ export function AppShell({ updateVersion }: { updateVersion?: string | null }) {
           </div>
           </div>
         </header>
+        {restoreNotice && (
+          <div role="status" className={`flex items-start justify-between gap-4 border-b px-8 py-2.5 text-xs ${restoreNotice.status === "restored" ? "border-teal-100 bg-teal-50 text-teal-900" : "border-rose-100 bg-rose-50 text-rose-900"}`}>
+            <p>
+              {restoreNotice.status === "restored"
+                ? `Se restauró el respaldo del ${new Date(restoreNotice.outcome.backupCreatedAt).toLocaleString("es")}.${restoreNotice.outcome.preRestoreBackup ? ` El estado anterior quedó guardado en ${restoreNotice.outcome.preRestoreBackup}.` : ""}`
+                : `No se pudo aplicar la restauración; tus datos anteriores se conservaron. ${restoreNotice.message}`}
+            </p>
+            <button type="button" className="font-semibold hover:underline" onClick={onDismissRestoreNotice}>Cerrar</button>
+          </div>
+        )}
         <main className="min-h-0 flex-1 overflow-y-auto"><Outlet /></main>
       </div>
     </div>

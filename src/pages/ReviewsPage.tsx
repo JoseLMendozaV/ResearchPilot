@@ -1,19 +1,25 @@
 import { FormEvent, useState } from "react";
-import { FolderKanban, LoaderCircle, Plus, X } from "lucide-react";
-import { Link } from "react-router-dom";
+import { open as openDialog } from "@tauri-apps/plugin-dialog";
+import { FileInput, FolderKanban, LoaderCircle, Plus, X } from "lucide-react";
+import { Link, useNavigate } from "react-router-dom";
 import { errorMessage } from "../lib/backend";
+import { exchangeSummaryText, maintenance } from "../lib/maintenance";
 import { formatDate, projectStatusLabels, reviewTypeLabels } from "../lib/reviews";
 import type { CreateProjectInput, ReviewProject, ReviewType } from "../types";
 
 interface Props {
   projects: ReviewProject[];
   createProject: (input: CreateProjectInput) => Promise<void>;
+  onImported?: () => void;
 }
 
 const emptyForm: CreateProjectInput = { name: "", description: "", reviewType: "systematic_review" };
 
-export function ReviewsPage({ projects, createProject }: Props) {
+export function ReviewsPage({ projects, createProject, onImported }: Props) {
   const [open, setOpen] = useState(false);
+  const [importing, setImporting] = useState(false);
+  const [importMessage, setImportMessage] = useState<{ text: string; projectId?: string; error?: boolean } | null>(null);
+  const navigate = useNavigate();
   const [form, setForm] = useState<CreateProjectInput>(emptyForm);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -33,14 +39,41 @@ export function ReviewsPage({ projects, createProject }: Props) {
     }
   }
 
+  async function importPackage() {
+    const path = await openDialog({ multiple: false, filters: [{ name: "Paquete de intercambio de ResearchPilot", extensions: ["json"] }] });
+    if (typeof path !== "string") return;
+    setImporting(true);
+    setImportMessage(null);
+    try {
+      const summary = await maintenance.importExchange(path);
+      setImportMessage({ text: exchangeSummaryText(summary), projectId: summary.projectId });
+      onImported?.();
+    } catch (cause) {
+      setImportMessage({ text: errorMessage(cause), error: true });
+    } finally {
+      setImporting(false);
+    }
+  }
+
   return (
     <div className="mx-auto max-w-[1280px] p-8">
       <div className="flex items-center justify-between">
         <div>
           <p className="text-sm text-slate-500">{projects.length} {projects.length === 1 ? "proyecto" : "proyectos"} en este equipo</p>
         </div>
-        <button className="button-primary" onClick={() => setOpen(true)}><Plus className="size-4" /> Nueva revisión</button>
+        <div className="flex gap-2">
+          <button className="button-secondary" disabled={importing} onClick={() => void importPackage()} title="Revisión compartida por otro revisor">
+            {importing ? <LoaderCircle className="size-4 animate-spin" /> : <FileInput className="size-4" />} Importar paquete de intercambio
+          </button>
+          <button className="button-primary" onClick={() => setOpen(true)}><Plus className="size-4" /> Nueva revisión</button>
+        </div>
       </div>
+      {importMessage && (
+        <p className={`mt-4 rounded-lg px-3 py-2 text-xs ${importMessage.error ? "bg-rose-50 text-rose-800" : "bg-teal-50 text-teal-900"}`}>
+          {importMessage.text}
+          {importMessage.projectId && <button className="ml-2 font-semibold underline" onClick={() => navigate(`/revisiones/${importMessage.projectId}`)}>Abrir revisión</button>}
+        </p>
+      )}
 
       {projects.length ? (
         <div className="mt-6 grid grid-cols-3 gap-4">
