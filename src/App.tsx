@@ -1,10 +1,11 @@
-import { lazy, Suspense, useEffect } from "react";
+import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import { HashRouter, Navigate, Route, Routes, useParams } from "react-router-dom";
 import { AppShell } from "./components/AppShell";
 import { ErrorView, LoadingView } from "./components/StateViews";
 import { useJobs } from "./hooks/useJobs";
 import { useResearchPilot } from "./hooks/useResearchPilot";
 import { I18nProvider } from "./i18n/I18nProvider";
+import { checkForUpdate } from "./lib/updates";
 import { DashboardPage } from "./pages/DashboardPage";
 import { EvidencePage } from "./pages/EvidencePage";
 import { LibraryPage } from "./pages/LibraryPage";
@@ -25,6 +26,16 @@ export default function App() {
   // Finished jobs change dashboard counters (evidence, values to review).
   const jobs = useJobs(() => void app.refreshQuietly());
   const appearance = app.data?.settings.appearance ?? "system";
+  const [updateVersion, setUpdateVersion] = useState<string | null>(null);
+  const checkedUpdates = useRef(false);
+
+  // Optional check at start-up; never in local-only mode and at most once per session.
+  useEffect(() => {
+    const settings = app.data?.settings;
+    if (!settings || checkedUpdates.current || !settings.checkUpdatesOnStart || settings.localOnly) return;
+    checkedUpdates.current = true;
+    checkForUpdate().then((update) => setUpdateVersion(update?.version ?? null)).catch(() => undefined);
+  }, [app.data?.settings]);
 
   useEffect(() => {
     const media = window.matchMedia("(prefers-color-scheme: dark)");
@@ -42,7 +53,7 @@ export default function App() {
     <I18nProvider language={app.data?.settings.defaultLanguage ?? "es"}>
       <HashRouter>
       <Routes>
-        <Route element={<AppShell />}>
+        <Route element={<AppShell updateVersion={updateVersion} />}>
           {app.loading && !app.data ? (
             <Route path="*" element={<LoadingView />} />
           ) : app.error || !app.data ? (

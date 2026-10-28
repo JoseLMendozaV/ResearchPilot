@@ -74,3 +74,4 @@ Documentación de referencia:
 - [Cierre de Fase 4](docs/phase-4.md)
 - [Cierre de Fase 5](docs/phase-5.md)
 - [Cierre de Fase 6](docs/phase-6.md)
+- [Publicar versiones y actualizaciones](docs/releasing.md)

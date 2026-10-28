@@ -34,7 +34,7 @@ const titles: Record<string, { title: MessageKey; subtitle: MessageKey }> = {
   "/configuracion": { title: "header.settings.title", subtitle: "header.settings.subtitle" },
 };
 
-export function AppShell() {
+export function AppShell({ updateVersion }: { updateVersion?: string | null }) {
   const location = useLocation();
   const heading = location.pathname.startsWith("/biblioteca/")
     ? { title: "header.library.title" as MessageKey, subtitle: "header.library.subtitle" as MessageKey }
@@ -92,9 +92,16 @@ export function AppShell() {
             <h1 className="text-xl font-semibold tracking-[-0.025em] text-slate-900">{t(heading.title)}</h1>
             <p className="mt-0.5 text-xs text-slate-400">{t(heading.subtitle)}</p>
           </div>
+          <div className="flex items-center gap-2">
+          {updateVersion && (
+            <NavLink to="/configuracion" className="rounded-full bg-teal-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-teal-500">
+              Actualización {updateVersion} disponible
+            </NavLink>
+          )}
           <div className="flex items-center gap-2 rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-medium text-slate-500">
             <span className="size-2 rounded-full bg-emerald-500 shadow-[0_0_0_3px_rgba(34,197,94,0.12)]" />
             {t("shell.database")}
+          </div>
           </div>
         </header>
         <main className="min-h-0 flex-1 overflow-y-auto"><Outlet /></main>

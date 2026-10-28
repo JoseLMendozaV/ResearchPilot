@@ -2,6 +2,7 @@ import { FormEvent, useCallback, useEffect, useState } from "react";
 import { Check, Cloud, Database, Download, HardDrive, LoaderCircle, RefreshCw, ScanText, ShieldCheck, Sparkles, TriangleAlert } from "lucide-react";
 import { AiSettings } from "../components/settings/AiSettings";
 import { ExternalLogPanel, ExternalProviders } from "../components/settings/ExternalProviders";
+import { UpdatesSection } from "../components/settings/UpdatesSection";
 import { backend, errorMessage } from "../lib/backend";
 import { onJobChanged } from "../lib/events";
 import { jobStatusLabels } from "../lib/extraction";
@@ -117,6 +118,10 @@ export function SettingsPage({ settings, databasePath, saveSettings }: Props) {
         <label className="label mt-4">Intérprete de Python (opcional)
           <input className="input mt-1.5 font-mono" value={form.extractorPythonPath} onChange={(event) => setForm({ ...form, extractorPythonPath: event.target.value })} placeholder="Vacío: entorno de la aplicación o Python del sistema" />
         </label>
+      </SettingsSection>
+
+      <SettingsSection icon={RefreshCw} title="Actualizaciones" description="Versiones publicadas en GitHub, firmadas y verificadas antes de instalarse.">
+        <UpdatesSection checkOnStart={form.checkUpdatesOnStart} onCheckOnStartChange={(value) => setForm({ ...form, checkUpdatesOnStart: value })} />
       </SettingsSection>
 
       <SettingsSection icon={Database} title="Almacenamiento" description="Base persistente administrada por el núcleo Rust.">

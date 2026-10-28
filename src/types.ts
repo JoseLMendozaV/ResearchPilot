@@ -30,6 +30,7 @@ export interface AppSettings {
   anthropicModel: string;
   externalMonthlyBudgetUsd: number;
   externalMaxOutputTokens: number;
+  checkUpdatesOnStart: boolean;
 }
 
 export interface ReviewProject {

@@ -29,6 +29,7 @@ pub struct AppSettings {
     pub anthropic_model: String,
     pub external_monthly_budget_usd: f64,
     pub external_max_output_tokens: i64,
+    pub check_updates_on_start: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

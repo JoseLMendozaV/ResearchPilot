@@ -53,6 +53,11 @@ const MIGRATIONS: &[(i64, &str, &str)] = &[
         "systematic review methodology modules",
         include_str!("../migrations/0008_review_methodology.sql"),
     ),
+    (
+        9,
+        "update check preference",
+        include_str!("../migrations/0009_updates.sql"),
+    ),
 ];
 const REVIEW_TYPES: [&str; 3] = ["systematic_review", "systematic_mapping", "scoping_review"];
 
@@ -139,7 +144,8 @@ impl Database {
                         grobid_url, extraction_timeout_seconds, extractor_python_path,
                         ollama_embedding_model, ollama_extraction_model, auto_index_after_extraction,
                         rag_mode, rag_top_k, rag_context_tokens, ai_timeout_seconds,
-                        openai_model, anthropic_model, external_monthly_budget_usd, external_max_output_tokens
+                        openai_model, anthropic_model, external_monthly_budget_usd, external_max_output_tokens,
+                        check_updates_on_start
                  FROM app_settings WHERE id = 1",
                 [],
                 |row| {
@@ -170,6 +176,7 @@ impl Database {
                         anthropic_model: row.get(23)?,
                         external_monthly_budget_usd: row.get(24)?,
                         external_max_output_tokens: row.get(25)?,
+                        check_updates_on_start: row.get(26)?,
                     })
                 },
             )
@@ -190,7 +197,7 @@ impl Database {
                  ollama_extraction_model = ?18, auto_index_after_extraction = ?19, rag_mode = ?20,
                  rag_top_k = ?21, rag_context_tokens = ?22, ai_timeout_seconds = ?23,
                  openai_model = ?24, anthropic_model = ?25, external_monthly_budget_usd = ?26,
-                 external_max_output_tokens = ?27
+                 external_max_output_tokens = ?27, check_updates_on_start = ?28
              WHERE id = 1",
             params![
                 settings.researcher_name.trim(),
@@ -220,6 +227,7 @@ impl Database {
                 settings.anthropic_model.trim(),
                 settings.external_monthly_budget_usd,
                 settings.external_max_output_tokens,
+                settings.check_updates_on_start,
             ],
         )?;
         self.settings()

@@ -30,3 +30,6 @@ python/**/__pycache__
 # Python
 python/.venv
 *.pyc
+
+# Release artifacts
+dist-release

@@ -1,6 +1,6 @@
 [package]
 name = "researchpilot"
-version = "0.6.0"
+version = "0.6.1"
 description = "Local-first evidence management for scientific reviews"
 authors = ["ResearchPilot contributors"]
 edition = "2024"
@@ -32,6 +32,8 @@ lopdf = "0.46.0"
 csv = "1.4.0"
 ureq = { version = "3.5.0", features = ["json"] }
 keyring = { version = "3", features = ["apple-native", "windows-native"] }
+tauri-plugin-updater = "2"
+tauri-plugin-process = "2"
 
 
 # Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration
