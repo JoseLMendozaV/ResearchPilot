@@ -13,6 +13,7 @@ Se inspeccionaron los metadatos de todos los paquetes instalados por npm y Cargo
 - La licencia propia de ResearchPilot aún debe decidirse antes de distribuir código o binarios.
 - Dependencias incorporadas en Fase 2: PDF.js (Apache-2.0), `lopdf` (MIT), `csv` (MIT/Unlicense) y el diálogo oficial de Tauri (Apache-2.0/MIT).
 - Fase 3 (Python, no incluidas en el binario; se instalan en el entorno del extractor tras confirmación): `pdfplumber` 0.11.10 (MIT), `pdfminer.six` (MIT), `pypdfium2` (Apache-2.0 o BSD-3-Clause; incluye binarios de PDFium bajo licencias BSD/Apache), `Pillow` (MIT-CMU), `charset-normalizer` (MIT), `cryptography` (Apache-2.0 o BSD-3-Clause). Tesseract (Apache-2.0) y GROBID (Apache-2.0) no se distribuyen: los instala y ejecuta el usuario.
+- Fase 5: `keyring` 3.6 (MIT/Apache-2.0) con el backend nativo del Llavero de macOS.
 - Fase 4: `ureq` 3.5 (MIT/Apache-2.0) con `rustls` (Apache-2.0/MIT/ISC) y `ring`/`webpki` (licencias permisivas tipo ISC/Apache). Ollama no se distribuye; los modelos que el usuario descargue tienen licencias propias que la interfaz recomienda revisar.
 
 ## Componentes previstos

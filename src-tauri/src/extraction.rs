@@ -591,6 +591,25 @@ impl Database {
         })
     }
 
+    pub fn master_fields(&self) -> AppResult<Vec<MasterField>> {
+        let connection = self.open()?;
+        let mut statement = connection.prepare(
+            "SELECT field_key, group_key, label_es, label_en, data_type, multi_valued FROM master_record_fields ORDER BY display_order",
+        )?;
+        Ok(statement
+            .query_map([], |row| {
+                Ok(MasterField {
+                    field_key: row.get(0)?,
+                    group_key: row.get(1)?,
+                    label_es: row.get(2)?,
+                    label_en: row.get(3)?,
+                    data_type: row.get(4)?,
+                    multi_valued: row.get(5)?,
+                })
+            })?
+            .collect::<Result<Vec<_>, _>>()?)
+    }
+
     pub fn update_master_value(&self, input: UpdateMasterValueInput) -> AppResult<MasterValue> {
         if !HUMAN_STATUSES.contains(&input.status.as_str()) {
             return Err(AppError::Validation("Estado de revisión no válido".into()));

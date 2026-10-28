@@ -6,6 +6,13 @@ export const reviewTypeLabels: Record<ReviewType, string> = {
   scoping_review: "Revisión de alcance",
 };
 
+export const projectStatusLabels: Record<"draft" | "active" | "completed" | "archived", string> = {
+  draft: "Borrador",
+  active: "En curso",
+  completed: "Completada",
+  archived: "Archivada",
+};
+
 export function formatDate(value: string): string {
   return new Intl.DateTimeFormat("es", {
     day: "2-digit",

@@ -1,3 +1,4 @@
+import { GuideContent } from "./review/GuideContent";
 import {
   BookOpenCheck,
   CheckCircle2,
@@ -26,10 +27,10 @@ export function ProtocolPage() {
           <div>
             <h2 className="section-title">Cobertura del formato de evidencia</h2>
             <p className="mt-1 max-w-2xl text-sm leading-6 text-slate-500">
-              Las siete hojas del archivo de referencia ya tienen entidades persistentes y relaciones explícitas. Los editores interactivos se incorporarán progresivamente sobre esta base.
+              Cada hoja del formato de evidencia es un módulo interactivo dentro de cada revisión: abre una revisión y usa sus pestañas Leer, Control, RQs, Cadena, I/E, Calidad y Extracción.
             </p>
           </div>
-          <span className="shrink-0 rounded-full bg-teal-50 px-3 py-1.5 text-xs font-semibold text-teal-700">7 de 7 modeladas</span>
+          <span className="shrink-0 rounded-full bg-teal-50 px-3 py-1.5 text-xs font-semibold text-teal-700">7 de 7 con editor</span>
         </div>
         <div className="mt-6 grid grid-cols-2 gap-3" data-testid="workflow-modules">
           {workflowModules.map(({ sheet, title, description, icon: Icon }, index) => (
@@ -47,9 +48,10 @@ export function ProtocolPage() {
           ))}
         </div>
       </div>
-      <div className="mt-5 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs leading-5 text-amber-800">
-        Fase 1 establece estructura y persistencia. La edición completa de RQs, cadenas, criterios, calidad y extracción no se presenta como terminada todavía.
+      <div className="mt-5 rounded-xl border border-slate-200 bg-white px-4 py-3 text-xs leading-5 text-slate-500">
+        La exportación al libro de Excel con las siete hojas y la versión ampliada con procedencia pertenecen a la Fase 7.
       </div>
+      <div className="mt-6"><GuideContent /></div>
     </div>
   );
 }

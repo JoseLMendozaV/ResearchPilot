@@ -37,4 +37,4 @@ Las pruebas verifican las cabeceras y el cuerpo exactos enviados (clave, versió
 
 - Las solicitudes externas no usan streaming: cancelar una pregunta externa surte efecto antes de enviarla o entre campos, no a mitad de una respuesta.
 - Los precios no se actualizan solos; los de referencia pueden quedar desfasados.
-- La política por proyecto llega con la Fase 6.
+- No hay todavía una política de IA externa por proyecto; la protección por documento es la marca de confidencialidad.

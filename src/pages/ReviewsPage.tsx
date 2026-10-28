@@ -1,7 +1,8 @@
 import { FormEvent, useState } from "react";
 import { FolderKanban, LoaderCircle, Plus, X } from "lucide-react";
+import { Link } from "react-router-dom";
 import { errorMessage } from "../lib/backend";
-import { formatDate, reviewTypeLabels } from "../lib/reviews";
+import { formatDate, projectStatusLabels, reviewTypeLabels } from "../lib/reviews";
 import type { CreateProjectInput, ReviewProject, ReviewType } from "../types";
 
 interface Props {
@@ -44,10 +45,10 @@ export function ReviewsPage({ projects, createProject }: Props) {
       {projects.length ? (
         <div className="mt-6 grid grid-cols-3 gap-4">
           {projects.map((project) => (
-            <article key={project.id} className="panel group p-5 transition hover:-translate-y-0.5 hover:shadow-md">
+            <Link key={project.id} to={`/revisiones/${project.id}`} className="panel group block p-5 transition hover:-translate-y-0.5 hover:shadow-md">
               <div className="flex items-start justify-between">
                 <div className="grid size-10 place-items-center rounded-xl bg-teal-50 text-teal-700"><FolderKanban className="size-5" /></div>
-                <span className="status-badge">Borrador</span>
+                <span className="status-badge">{projectStatusLabels[project.status]}</span>
               </div>
               <h2 className="mt-4 line-clamp-2 text-[15px] font-semibold leading-5 text-slate-800">{project.name}</h2>
               <p className="mt-2 line-clamp-2 min-h-10 text-xs leading-5 text-slate-400">{project.description || "Sin descripción"}</p>
@@ -55,7 +56,7 @@ export function ReviewsPage({ projects, createProject }: Props) {
                 <p className="text-xs font-medium text-slate-500">{reviewTypeLabels[project.reviewType]}</p>
                 <p className="mt-1 text-[11px] text-slate-400">Creado {formatDate(project.createdAt)}</p>
               </div>
-            </article>
+            </Link>
           ))}
         </div>
       ) : (

@@ -38,6 +38,8 @@ export function AppShell() {
   const location = useLocation();
   const heading = location.pathname.startsWith("/biblioteca/")
     ? { title: "header.library.title" as MessageKey, subtitle: "header.library.subtitle" as MessageKey }
+    : location.pathname.startsWith("/revisiones/")
+    ? { title: "header.reviews.title" as MessageKey, subtitle: "header.reviews.subtitle" as MessageKey }
     : titles[location.pathname] ?? titles["/"];
   const t = useI18n();
 

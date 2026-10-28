@@ -7,9 +7,13 @@ mod extraction;
 mod indexing;
 mod jobs;
 mod library;
+mod matrix;
 mod models;
 mod ollama;
+mod quality;
 mod rag;
+mod review;
+mod screening;
 mod secrets;
 mod worker;
 
@@ -565,6 +569,326 @@ fn delete_conversation(database: State<'_, Database>, conversation_id: String) -
     database.delete_conversation(&conversation_id)
 }
 
+// --- Phase 6: systematic review methodology --------------------------------------------
+
+#[tauri::command]
+fn project_workspace(
+    database: State<'_, Database>,
+    project_id: String,
+) -> AppResult<review::ProjectWorkspace> {
+    database.project_workspace(&project_id)
+}
+
+#[tauri::command]
+fn update_project_settings(
+    database: State<'_, Database>,
+    input: review::ProjectSettingsInput,
+) -> AppResult<review::ProjectWorkspace> {
+    database.update_project_settings(input)
+}
+
+#[tauri::command]
+fn add_project_reviewer(
+    database: State<'_, Database>,
+    project_id: String,
+    name: String,
+    role: String,
+) -> AppResult<review::ProjectWorkspace> {
+    database.add_project_reviewer(&project_id, &name, &role)
+}
+
+#[tauri::command]
+fn set_active_reviewer(
+    database: State<'_, Database>,
+    project_id: String,
+    reviewer_id: String,
+) -> AppResult<review::ProjectWorkspace> {
+    database.set_active_reviewer(&project_id, &reviewer_id)
+}
+
+#[tauri::command]
+fn save_protocol(
+    database: State<'_, Database>,
+    project_id: String,
+    content: serde_json::Value,
+    amendment_reason: Option<String>,
+) -> AppResult<Vec<review::ProtocolVersion>> {
+    database.save_protocol(&project_id, content, amendment_reason)
+}
+
+#[tauri::command]
+fn approve_protocol(
+    database: State<'_, Database>,
+    project_id: String,
+) -> AppResult<Vec<review::ProtocolVersion>> {
+    database.approve_protocol(&project_id)
+}
+
+#[tauri::command]
+fn add_to_corpus(
+    database: State<'_, Database>,
+    project_id: String,
+    article_ids: Vec<String>,
+) -> AppResult<i64> {
+    database.add_to_corpus(&project_id, &article_ids, Some("Biblioteca"))
+}
+
+#[tauri::command]
+fn set_corpus_flags(
+    database: State<'_, Database>,
+    project_id: String,
+    article_id: String,
+    is_secondary: Option<bool>,
+    removed: Option<bool>,
+) -> AppResult<()> {
+    database.set_corpus_flags(&project_id, &article_id, is_secondary, removed, None)
+}
+
+#[tauri::command]
+fn control_coverage(
+    database: State<'_, Database>,
+    project_id: String,
+) -> AppResult<review::ControlCoverage> {
+    database.control_coverage(&project_id)
+}
+
+#[tauri::command]
+fn add_control_article(
+    database: State<'_, Database>,
+    project_id: String,
+    article_id: String,
+    rationale: String,
+) -> AppResult<review::ControlCoverage> {
+    database.add_control_article(&project_id, &article_id, &rationale)
+}
+
+#[tauri::command]
+fn remove_control_article(
+    database: State<'_, Database>,
+    project_id: String,
+    control_id: String,
+) -> AppResult<review::ControlCoverage> {
+    database.remove_control_article(&project_id, &control_id)
+}
+
+#[tauri::command]
+fn research_questions(
+    database: State<'_, Database>,
+    project_id: String,
+) -> AppResult<review::QuestionsOverview> {
+    database.research_questions(&project_id)
+}
+
+#[tauri::command]
+fn save_research_question(
+    database: State<'_, Database>,
+    input: review::QuestionInput,
+) -> AppResult<review::QuestionsOverview> {
+    database.save_research_question(input)
+}
+
+#[tauri::command]
+fn delete_research_question(
+    database: State<'_, Database>,
+    project_id: String,
+    question_id: String,
+) -> AppResult<review::QuestionsOverview> {
+    database.delete_research_question(&project_id, &question_id)
+}
+
+#[tauri::command]
+fn save_extraction_field(
+    database: State<'_, Database>,
+    input: review::FieldInput,
+) -> AppResult<review::QuestionsOverview> {
+    database.save_extraction_field(input)
+}
+
+#[tauri::command]
+fn delete_extraction_field(
+    database: State<'_, Database>,
+    project_id: String,
+    field_id: String,
+) -> AppResult<review::QuestionsOverview> {
+    database.delete_extraction_field(&project_id, &field_id)
+}
+
+#[tauri::command]
+fn search_strategies(
+    database: State<'_, Database>,
+    project_id: String,
+) -> AppResult<Vec<review::SearchStrategy>> {
+    database.search_strategies(&project_id)
+}
+
+#[tauri::command]
+fn save_search_strategy(
+    database: State<'_, Database>,
+    input: review::StrategyInput,
+) -> AppResult<Vec<review::SearchStrategy>> {
+    database.save_search_strategy(input)
+}
+
+#[tauri::command]
+fn delete_search_strategy(
+    database: State<'_, Database>,
+    project_id: String,
+    strategy_id: String,
+) -> AppResult<Vec<review::SearchStrategy>> {
+    database.delete_search_strategy(&project_id, &strategy_id)
+}
+
+#[tauri::command]
+fn import_strategy_results(
+    database: State<'_, Database>,
+    strategy_id: String,
+    path: String,
+) -> AppResult<review::StrategyImportResult> {
+    database.import_strategy_results(&strategy_id, &path)
+}
+
+#[tauri::command]
+fn eligibility_criteria(
+    database: State<'_, Database>,
+    project_id: String,
+) -> AppResult<Vec<screening::Criterion>> {
+    database.eligibility_criteria(&project_id)
+}
+
+#[tauri::command]
+fn save_criterion(
+    database: State<'_, Database>,
+    input: screening::CriterionInput,
+) -> AppResult<Vec<screening::Criterion>> {
+    database.save_criterion(input)
+}
+
+#[tauri::command]
+fn delete_criterion(
+    database: State<'_, Database>,
+    project_id: String,
+    criterion_id: String,
+) -> AppResult<Vec<screening::Criterion>> {
+    database.delete_criterion(&project_id, &criterion_id)
+}
+
+#[tauri::command]
+fn screening_table(
+    database: State<'_, Database>,
+    project_id: String,
+    phase: String,
+) -> AppResult<screening::ScreeningTable> {
+    database.screening_table(&project_id, &phase)
+}
+
+#[tauri::command]
+fn record_screening_decision(
+    database: State<'_, Database>,
+    input: screening::DecisionInput,
+) -> AppResult<screening::ScreeningRow> {
+    database.record_screening_decision(input)
+}
+
+#[tauri::command]
+fn resolve_screening_conflict(
+    database: State<'_, Database>,
+    conflict_id: String,
+    decision: String,
+    criterion_id: Option<String>,
+    reason: String,
+) -> AppResult<screening::ScreeningRow> {
+    database.resolve_screening_conflict(&conflict_id, &decision, criterion_id, &reason)
+}
+
+#[tauri::command]
+fn review_conflicts(
+    database: State<'_, Database>,
+    project_id: String,
+) -> AppResult<Vec<screening::ConflictInfo>> {
+    database.conflicts(&project_id)
+}
+
+#[tauri::command]
+fn quality_table(
+    database: State<'_, Database>,
+    project_id: String,
+) -> AppResult<quality::QualityTable> {
+    database.quality_table(&project_id)
+}
+
+#[tauri::command]
+fn save_quality_criterion(
+    database: State<'_, Database>,
+    input: quality::QualityCriterionInput,
+) -> AppResult<Vec<quality::QualityCriterion>> {
+    database.save_quality_criterion(input)
+}
+
+#[tauri::command]
+fn delete_quality_criterion(
+    database: State<'_, Database>,
+    project_id: String,
+    criterion_id: String,
+) -> AppResult<Vec<quality::QualityCriterion>> {
+    database.delete_quality_criterion(&project_id, &criterion_id)
+}
+
+#[tauri::command]
+fn save_quality_scores(
+    database: State<'_, Database>,
+    project_id: String,
+    article_id: String,
+    scores: Vec<quality::ScoreEntry>,
+) -> AppResult<quality::QualityTable> {
+    database.save_quality_scores(&project_id, &article_id, scores)
+}
+
+#[tauri::command]
+fn resolve_quality_conflict(
+    database: State<'_, Database>,
+    conflict_id: String,
+    scores: Vec<quality::ScoreEntry>,
+    reason: String,
+) -> AppResult<quality::QualityTable> {
+    database.resolve_quality_conflict(&conflict_id, scores, &reason)
+}
+
+#[tauri::command]
+fn extraction_matrix(
+    database: State<'_, Database>,
+    project_id: String,
+    include_eligible: bool,
+) -> AppResult<matrix::ExtractionMatrix> {
+    database.extraction_matrix(&project_id, include_eligible)
+}
+
+#[tauri::command]
+fn save_extraction_value(
+    database: State<'_, Database>,
+    input: matrix::CellInput,
+) -> AppResult<Vec<matrix::CellValue>> {
+    database.save_extraction_value(input)
+}
+
+#[tauri::command]
+fn prefill_matrix_from_master(database: State<'_, Database>, project_id: String) -> AppResult<i64> {
+    database.prefill_matrix_from_master(&project_id)
+}
+
+#[tauri::command]
+fn list_master_fields(database: State<'_, Database>) -> AppResult<Vec<models::MasterField>> {
+    database.master_fields()
+}
+
+#[tauri::command]
+fn project_audit(
+    database: State<'_, Database>,
+    project_id: String,
+    limit: i64,
+) -> AppResult<Vec<review::AuditEntry>> {
+    database.project_audit(&project_id, limit)
+}
+
 fn worker_environment(
     app: &tauri::App,
     app_data_dir: &std::path::Path,
@@ -664,7 +988,44 @@ pub fn run() {
             list_model_pricing,
             set_model_pricing,
             external_log,
-            set_article_confidential
+            set_article_confidential,
+            project_workspace,
+            update_project_settings,
+            add_project_reviewer,
+            set_active_reviewer,
+            save_protocol,
+            approve_protocol,
+            add_to_corpus,
+            set_corpus_flags,
+            control_coverage,
+            add_control_article,
+            remove_control_article,
+            research_questions,
+            save_research_question,
+            delete_research_question,
+            save_extraction_field,
+            delete_extraction_field,
+            search_strategies,
+            save_search_strategy,
+            delete_search_strategy,
+            import_strategy_results,
+            eligibility_criteria,
+            save_criterion,
+            delete_criterion,
+            screening_table,
+            record_screening_decision,
+            resolve_screening_conflict,
+            review_conflicts,
+            quality_table,
+            save_quality_criterion,
+            delete_quality_criterion,
+            save_quality_scores,
+            resolve_quality_conflict,
+            extraction_matrix,
+            save_extraction_value,
+            prefill_matrix_from_master,
+            project_audit,
+            list_master_fields
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

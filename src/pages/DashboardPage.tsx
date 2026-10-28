@@ -9,7 +9,7 @@ import {
   Sparkles,
 } from "lucide-react";
 import { Link } from "react-router-dom";
-import { formatDate, reviewTypeLabels } from "../lib/reviews";
+import { formatDate, projectStatusLabels, reviewTypeLabels } from "../lib/reviews";
 import type { BootstrapData } from "../types";
 
 export function DashboardPage({ data }: { data: BootstrapData }) {
@@ -66,14 +66,14 @@ export function DashboardPage({ data }: { data: BootstrapData }) {
           {data.projects.length ? (
             <div className="mt-5 divide-y divide-slate-100">
               {data.projects.slice(0, 4).map((project) => (
-                <div key={project.id} className="flex items-center gap-4 py-3.5 first:pt-0 last:pb-0">
+                <Link key={project.id} to={`/revisiones/${project.id}`} className="flex items-center gap-4 py-3.5 first:pt-0 last:pb-0 hover:opacity-80">
                   <div className="grid size-9 place-items-center rounded-lg bg-teal-50 text-teal-700"><FolderKanban className="size-4" /></div>
                   <div className="min-w-0 flex-1">
                     <p className="truncate text-sm font-semibold text-slate-800">{project.name}</p>
                     <p className="mt-0.5 text-xs text-slate-400">{reviewTypeLabels[project.reviewType]} · {formatDate(project.updatedAt)}</p>
                   </div>
-                  <span className="status-badge">Borrador</span>
-                </div>
+                  <span className="status-badge">{projectStatusLabels[project.status]}</span>
+                </Link>
               ))}
             </div>
           ) : (

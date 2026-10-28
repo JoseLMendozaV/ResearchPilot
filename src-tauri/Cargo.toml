@@ -1,6 +1,6 @@
 [package]
 name = "researchpilot"
-version = "0.4.0"
+version = "0.6.0"
 description = "Local-first evidence management for scientific reviews"
 authors = ["ResearchPilot contributors"]
 edition = "2024"

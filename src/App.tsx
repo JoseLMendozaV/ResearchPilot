@@ -8,6 +8,7 @@ import { I18nProvider } from "./i18n/I18nProvider";
 import { DashboardPage } from "./pages/DashboardPage";
 import { EvidencePage } from "./pages/EvidencePage";
 import { LibraryPage } from "./pages/LibraryPage";
+import { ProjectWorkspacePage } from "./pages/ProjectWorkspacePage";
 import { ProtocolPage } from "./pages/ProtocolPage";
 import { ReviewsPage } from "./pages/ReviewsPage";
 import { AssistantPage } from "./pages/AssistantPage";
@@ -52,6 +53,7 @@ export default function App() {
               <Route path="/biblioteca" element={<LibraryPage articles={app.data.articles} collections={app.data.collections} importPdfFiles={app.importPdfFiles} importReferenceFiles={app.importReferenceFiles} searchLibrary={app.searchLibrary} archiveArticle={app.archiveArticle} createCollection={app.createCollection} />} />
               <Route path="/biblioteca/:articleId" element={<ArticleRoute articles={app.data.articles} collections={app.data.collections} updateMetadata={app.updateArticleMetadata} setArticleCollection={app.setArticleCollection} refresh={app.refreshQuietly} />} />
               <Route path="/revisiones" element={<ReviewsPage projects={app.data.projects} createProject={app.createProject} />} />
+              <Route path="/revisiones/:projectId" element={<ProjectWorkspacePage articles={app.data.articles} />} />
               <Route path="/protocolo" element={<ProtocolPage />} />
               <Route path="/evidencia" element={<EvidencePage stats={app.data.stats} />} />
               <Route path="/tareas" element={<TasksPage {...jobs} />} />

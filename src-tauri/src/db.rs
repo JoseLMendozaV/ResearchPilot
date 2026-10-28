@@ -48,6 +48,11 @@ const MIGRATIONS: &[(i64, &str, &str)] = &[
         "optional external AI gateway",
         include_str!("../migrations/0007_ai_gateway.sql"),
     ),
+    (
+        8,
+        "systematic review methodology modules",
+        include_str!("../migrations/0008_review_methodology.sql"),
+    ),
 ];
 const REVIEW_TYPES: [&str; 3] = ["systematic_review", "systematic_mapping", "scoping_review"];
 

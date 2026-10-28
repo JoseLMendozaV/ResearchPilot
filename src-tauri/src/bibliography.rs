@@ -37,12 +37,17 @@ impl Database {
         }
         let mut results = Vec::new();
         for path in paths {
-            results.extend(self.import_reference_file(&path)?);
+            results.extend(self.import_reference_file(&path)?.1);
         }
         Ok(results)
     }
 
-    fn import_reference_file(&self, source_path: &str) -> AppResult<Vec<ImportItemResult>> {
+    /// Import one file. Returns the batch holding its records (also when the same
+    /// file was imported before) so callers can link the records elsewhere.
+    pub(crate) fn import_reference_file(
+        &self,
+        source_path: &str,
+    ) -> AppResult<(Option<String>, Vec<ImportItemResult>)> {
         let path = fs::canonicalize(source_path)?;
         validate_reference_file(&path)?;
         let format = reference_format(&path)?;
@@ -57,14 +62,17 @@ impl Database {
                 |row| row.get(0),
             )
             .optional()?;
-        if previous_batch.is_some() {
-            return Ok(vec![ImportItemResult {
-                source_path: source_path.into(),
-                status: "duplicate".into(),
-                article_id: None,
-                title: None,
-                message: Some("Este archivo bibliográfico ya fue importado sin cambios".into()),
-            }]);
+        if let Some(previous) = previous_batch {
+            return Ok((
+                Some(previous),
+                vec![ImportItemResult {
+                    source_path: source_path.into(),
+                    status: "duplicate".into(),
+                    article_id: None,
+                    title: None,
+                    message: Some("Este archivo bibliográfico ya fue importado sin cambios".into()),
+                }],
+            ));
         }
 
         let batch_id = Uuid::new_v4().to_string();
@@ -83,13 +91,16 @@ impl Database {
                      SET status = 'failed', error_count = 1, completed_at = ?1 WHERE id = ?2",
                     params![now(), batch_id],
                 )?;
-                return Ok(vec![ImportItemResult {
-                    source_path: source_path.into(),
-                    status: "error".into(),
-                    article_id: None,
-                    title: None,
-                    message: Some(error.to_string()),
-                }]);
+                return Ok((
+                    None,
+                    vec![ImportItemResult {
+                        source_path: source_path.into(),
+                        status: "error".into(),
+                        article_id: None,
+                        title: None,
+                        message: Some(error.to_string()),
+                    }],
+                ));
             }
         };
 
@@ -227,7 +238,7 @@ impl Database {
             params![status, imported, duplicates, errors, now(), batch_id],
         )?;
         transaction.commit()?;
-        Ok(results)
+        Ok((Some(batch_id), results))
     }
 }
 
