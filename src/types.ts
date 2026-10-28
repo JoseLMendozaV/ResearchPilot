@@ -26,6 +26,10 @@ export interface AppSettings {
   ragTopK: number;
   ragContextTokens: number;
   aiTimeoutSeconds: number;
+  openaiModel: string;
+  anthropicModel: string;
+  externalMonthlyBudgetUsd: number;
+  externalMaxOutputTokens: number;
 }
 
 export interface ReviewProject {
@@ -81,6 +85,7 @@ export interface LibraryArticle {
   importedAt: string;
   updatedAt: string;
   collectionIds: string[];
+  confidential: boolean;
 }
 
 export interface ImportItemResult {
@@ -432,4 +437,53 @@ export interface AskInput {
   yearTo?: number;
   question: string;
   model?: string;
+  provider?: AiProvider;
+  consent?: ExternalConsent;
+}
+
+export type AiProvider = "ollama" | "openai" | "anthropic";
+
+export interface ExternalConsent {
+  provider: Exclude<AiProvider, "ollama">;
+  model: string;
+  maxCostUsd?: number;
+}
+
+export interface ExternalEstimate {
+  provider: Exclude<AiProvider, "ollama">;
+  model: string;
+  requests: number;
+  inputTokens: number;
+  expectedOutputTokens: number;
+  maxOutputTokens: number;
+  pricingKnown: boolean;
+  expectedCostUsd?: number;
+  worstCaseCostUsd?: number;
+  monthSpentUsd: number;
+  monthlyBudgetUsd: number;
+  withinBudget: boolean;
+  articles: { id: string; title: string }[];
+  excludedConfidential: number;
+  excerpts: number;
+}
+
+export interface ProviderStatus {
+  provider: "openai" | "anthropic";
+  hasKey: boolean;
+  keyHint?: string;
+}
+
+export interface ModelPrice {
+  provider: "openai" | "anthropic";
+  model: string;
+  inputUsdPerMtok: number;
+  outputUsdPerMtok: number;
+  source: "reference" | "user";
+  updatedAt: string;
+}
+
+export interface ExternalLog {
+  totalRequests: number;
+  monthSpentUsd: number;
+  entries: { createdAt: string; provider: string; model: string; operation: string; status: string; promptTokens?: number; completionTokens?: number; costUsd?: number; articleTitle?: string }[];
 }

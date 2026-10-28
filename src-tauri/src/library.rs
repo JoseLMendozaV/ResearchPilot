@@ -485,7 +485,8 @@ fn library_select() -> &'static str {
         COALESCE((SELECT COUNT(*) FROM document_pages p WHERE p.document_file_id = d.id), 0),
         COALESCE(d.imported_at, a.created_at), a.updated_at,
         COALESCE((SELECT json_group_array(ca.collection_id)
-                  FROM collection_articles ca WHERE ca.article_id = a.id), '[]')
+                  FROM collection_articles ca WHERE ca.article_id = a.id), '[]'),
+        a.confidential
      FROM articles a
      LEFT JOIN document_files d ON d.id = (
         SELECT df.id FROM document_files df
@@ -547,6 +548,7 @@ fn map_article(row: &Row<'_>) -> rusqlite::Result<LibraryArticle> {
         imported_at: row.get(13)?,
         updated_at: row.get(14)?,
         collection_ids: serde_json::from_str(&row.get::<_, String>(15)?).unwrap_or_default(),
+        confidential: row.get(16)?,
     })
 }
 

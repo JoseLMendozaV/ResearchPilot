@@ -25,6 +25,10 @@ pub struct AppSettings {
     pub rag_top_k: i64,
     pub rag_context_tokens: i64,
     pub ai_timeout_seconds: i64,
+    pub openai_model: String,
+    pub anthropic_model: String,
+    pub external_monthly_budget_usd: f64,
+    pub external_max_output_tokens: i64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -66,6 +70,7 @@ pub struct LibraryArticle {
     pub imported_at: String,
     pub updated_at: String,
     pub collection_ids: Vec<String>,
+    pub confidential: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

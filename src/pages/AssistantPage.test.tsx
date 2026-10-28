@@ -3,17 +3,19 @@ import "@testing-library/jest-dom/vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { ConversationDetail } from "../types";
+import type { AppSettings, ConversationDetail } from "../types";
 import { AssistantPage } from "./AssistantPage";
 
 const askAssistant = vi.fn();
 const searchChunks = vi.fn();
+const estimateAssistant = vi.fn();
 vi.mock("../lib/backend", () => ({
   backend: {
     listConversations: vi.fn().mockResolvedValue([]),
     ollamaStatus: vi.fn().mockResolvedValue({ baseUrl: "http://127.0.0.1:11434", reachable: true, version: "0.0.0", models: [{ name: "local-chat:8b", sizeBytes: 1, capabilities: ["completion"], kind: "chat" }], recommendation: "" }),
     askAssistant: (input: unknown) => askAssistant(input),
     searchChunks: (input: unknown) => searchChunks(input),
+    estimateAssistant: (input: unknown) => estimateAssistant(input),
     cancelAssistant: vi.fn(),
   },
   errorMessage: (error: unknown) => String(error),
@@ -40,8 +42,8 @@ function detail(status: "answered" | "unsupported"): ConversationDetail {
   };
 }
 
-function renderPage() {
-  render(<MemoryRouter><AssistantPage articles={[]} collections={[]} defaultModel="local-chat:8b" /></MemoryRouter>);
+function renderPage(aiProvider: AppSettings["aiProvider"] = "ollama") {
+  render(<MemoryRouter><AssistantPage articles={[]} collections={[]} settings={{ aiProvider, ollamaModel: "local-chat:8b", openaiModel: "", anthropicModel: "claude-opus-5-5" } as AppSettings} /></MemoryRouter>);
 }
 
 afterEach(cleanup);
@@ -77,5 +79,17 @@ describe("AssistantPage", () => {
     await waitFor(() => expect(screen.getByText("learning rate of 0.001")).toBeInTheDocument());
     expect(screen.getByText("Búsqueda semántica no disponible")).toBeInTheDocument();
     expect(screen.getByText(/léxico #1/)).toBeInTheDocument();
+  });
+
+  it("asks for explicit consent before sending to an external provider", async () => {
+    estimateAssistant.mockResolvedValueOnce({ provider: "anthropic", model: "claude-opus-5-5", requests: 1, inputTokens: 1000, expectedOutputTokens: 600, maxOutputTokens: 3000, pricingKnown: true, expectedCostUsd: 0.01, worstCaseCostUsd: 0.05, monthSpentUsd: 0, monthlyBudgetUsd: 0, withinBudget: true, articles: [], excludedConfidential: 0, excerpts: 3 });
+    askAssistant.mockResolvedValueOnce(detail("answered"));
+    renderPage("anthropic");
+    fireEvent.change(screen.getByRole("textbox", { name: "Pregunta" }), { target: { value: "¿Exactitud?" } });
+    fireEvent.click(screen.getByRole("button", { name: /Preguntar$/ }));
+    expect(await screen.findByRole("dialog")).toBeInTheDocument();
+    expect(askAssistant).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Autorizar este envío" }));
+    await waitFor(() => expect(askAssistant).toHaveBeenCalledWith(expect.objectContaining({ provider: "anthropic", model: "claude-opus-5-5", consent: { provider: "anthropic", model: "claude-opus-5-5", maxCostUsd: 0.05 } })));
   });
 });

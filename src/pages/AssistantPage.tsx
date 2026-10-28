@@ -1,14 +1,16 @@
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { AlertTriangle, BookOpenCheck, FileSearch, LoaderCircle, MessageSquarePlus, Search, Send, ShieldAlert, Square, Trash2 } from "lucide-react";
+import { AlertTriangle, BookOpenCheck, ClipboardCopy, ExternalLink, FileSearch, LoaderCircle, MessageSquarePlus, Search, Send, ShieldAlert, Square, Trash2 } from "lucide-react";
+import { openUrl } from "@tauri-apps/plugin-opener";
+import { ExternalConsentDialog } from "../components/ExternalConsentDialog";
 import { Link, useSearchParams } from "react-router-dom";
 import { backend, errorMessage } from "../lib/backend";
 import { evidenceLink, formatDateTime } from "../lib/extraction";
-import type { AssistantMessage, ConversationDetail, ConversationSummary, LibraryArticle, LibraryCollection, OllamaStatus, ScopeType, SearchOutcome } from "../types";
+import type { AiProvider, AppSettings, AskInput, AssistantMessage, ConversationDetail, ConversationSummary, ExternalConsent, ExternalEstimate, LibraryArticle, LibraryCollection, OllamaStatus, ScopeType, SearchOutcome } from "../types";
 
 interface Props {
   articles: LibraryArticle[];
   collections: LibraryCollection[];
-  defaultModel: string;
+  settings: AppSettings;
 }
 
 const statusLabels: Record<AssistantMessage["status"], { label: string; tone: string }> = {
@@ -19,7 +21,7 @@ const statusLabels: Record<AssistantMessage["status"], { label: string; tone: st
   failed: { label: "Error", tone: "bg-rose-50 text-rose-700" },
 };
 
-export function AssistantPage({ articles, collections, defaultModel }: Props) {
+export function AssistantPage({ articles, collections, settings }: Props) {
   const [searchParams] = useSearchParams();
   const [tab, setTab] = useState<"ask" | "search">("ask");
   const [conversations, setConversations] = useState<ConversationSummary[]>([]);
@@ -28,7 +30,10 @@ export function AssistantPage({ articles, collections, defaultModel }: Props) {
   const [scopeId, setScopeId] = useState(searchParams.get("id") ?? "");
   const [yearFrom, setYearFrom] = useState("");
   const [yearTo, setYearTo] = useState("");
-  const [model, setModel] = useState(defaultModel);
+  const [provider, setProvider] = useState<AiProvider>(settings.aiProvider);
+  const [model, setModel] = useState(settings.ollamaModel);
+  const [consentRequest, setConsentRequest] = useState<{ estimate: ExternalEstimate; input: AskInput } | null>(null);
+  const externalModel = provider === "openai" ? settings.openaiModel : provider === "anthropic" ? settings.anthropicModel : "";
   const [ollama, setOllama] = useState<OllamaStatus | null>(null);
   const [question, setQuestion] = useState("");
   const [pending, setPending] = useState<{ requestId: string; question: string } | null>(null);
@@ -90,16 +95,29 @@ export function AssistantPage({ articles, collections, defaultModel }: Props) {
       setError("Elige el artículo o la colección para este ámbito.");
       return;
     }
-    const requestId = crypto.randomUUID();
-    setPending({ requestId, question: text });
-    setQuestion("");
+    const input: AskInput = { requestId: crypto.randomUUID(), conversationId: detail?.conversation.id, question: text, provider, model: provider === "ollama" ? model || undefined : externalModel || undefined, ...scope() };
     setError(null);
+    if (provider !== "ollama") {
+      // Nothing leaves the machine until the user authorizes this exact estimate.
+      try {
+        setConsentRequest({ estimate: await backend.estimateAssistant(input), input });
+      } catch (cause) {
+        setError(errorMessage(cause));
+      }
+      return;
+    }
+    await send(input);
+  }
+
+  async function send(input: AskInput, consent?: ExternalConsent) {
+    setPending({ requestId: input.requestId, question: input.question });
+    setQuestion("");
     try {
-      setDetail(await backend.askAssistant({ requestId, conversationId: detail?.conversation.id, question: text, model: model || undefined, ...scope() }));
+      setDetail(await backend.askAssistant({ ...input, consent }));
       await loadConversations();
     } catch (cause) {
       setError(errorMessage(cause));
-      setQuestion(text);
+      setQuestion(input.question);
     } finally {
       setPending(null);
     }
@@ -180,6 +198,18 @@ export function AssistantPage({ articles, collections, defaultModel }: Props) {
             </span>
           </label>
           {tab === "ask" && (
+            <label className="label">Proveedor
+              <select className="input mt-1 w-36" value={provider} onChange={(event) => setProvider(event.target.value as AiProvider)}>
+                <option value="ollama">Ollama (local)</option>
+                <option value="openai">OpenAI</option>
+                <option value="anthropic">Anthropic</option>
+              </select>
+            </label>
+          )}
+          {tab === "ask" && provider !== "ollama" && (
+            <p className="mb-2 max-w-48 text-[10px] leading-4 text-amber-700">Externo · {externalModel || "sin modelo"}. Se pedirá confirmación con coste antes de enviar.</p>
+          )}
+          {tab === "ask" && provider === "ollama" && (
             <label className="label">Modelo
               <select className="input mt-1 w-52" value={model} onChange={(event) => setModel(event.target.value)}>
                 {!model && <option value="">Sin modelo</option>}
@@ -190,7 +220,15 @@ export function AssistantPage({ articles, collections, defaultModel }: Props) {
           )}
         </div>
 
-        {tab === "ask" && ollama && !ollama.reachable && (
+        {consentRequest && (
+          <ExternalConsentDialog
+            estimate={consentRequest.estimate}
+            purpose="Vas a hacer una pregunta al asistente con un proveedor externo."
+            onCancel={() => setConsentRequest(null)}
+            onConfirm={(consent) => { const input = consentRequest.input; setConsentRequest(null); void send(input, consent); }}
+          />
+        )}
+        {tab === "ask" && provider === "ollama" && ollama && !ollama.reachable && (
           <p className="mx-6 mt-4 flex items-start gap-2 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-900"><AlertTriangle className="mt-px size-4 shrink-0" />{ollama.message} <Link className="font-semibold underline" to="/configuracion">Configuración</Link></p>
         )}
         {error && <p className="mx-6 mt-4 rounded-lg bg-rose-50 px-3 py-2 text-xs text-rose-700">{error}</p>}
@@ -218,7 +256,7 @@ export function AssistantPage({ articles, collections, defaultModel }: Props) {
               <div ref={bottomRef} />
             </div>
           ) : (
-            <SearchResults result={searchResult} searching={searching} />
+            <SearchResults result={searchResult} searching={searching} question={question} />
           )}
         </div>
 
@@ -277,20 +315,47 @@ export function MessageView({ message }: { message: AssistantMessage }) {
   );
 }
 
-function SearchResults({ result, searching }: { result: SearchOutcome | null; searching: boolean }) {
+function SearchResults({ result, searching, question }: { result: SearchOutcome | null; searching: boolean; question: string }) {
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [copied, setCopied] = useState(false);
+
+  async function copyForWeb() {
+    if (!result) return;
+    const chosen = result.chunks.filter((chunk) => selected.has(chunk.chunkId));
+    const text = [
+      question.trim() ? `Pregunta: ${question.trim()}` : "",
+      "Responde solo con los extractos siguientes y cita la fuente [n] de cada afirmación.",
+      ...chosen.map((chunk, index) => `[${index + 1}] ${chunk.articleTitle}, p. ${chunk.page}:\n${chunk.text}`),
+    ].filter(Boolean).join("\n\n");
+    await navigator.clipboard.writeText(text);
+    setCopied(true);
+  }
   if (searching) return <div className="grid h-40 place-items-center"><LoaderCircle className="size-5 animate-spin text-teal-600" /></div>;
   if (!result) {
     return <p className="mx-auto mt-10 max-w-md text-center text-xs leading-5 text-slate-400">La búsqueda combina el índice léxico (FTS5) y, si hay un modelo de embeddings, el índice semántico local. No usa el modelo de lenguaje.</p>;
   }
   return (
     <div className="mx-auto max-w-3xl">
-      <p className="text-[11px] text-slate-400">{result.chunks.length} fragmento(s) · búsqueda {result.mode === "hybrid" ? "híbrida" : result.mode === "semantic" ? "semántica" : "léxica"}</p>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <p className="text-[11px] text-slate-400">{result.chunks.length} fragmento(s) · búsqueda {result.mode === "hybrid" ? "híbrida" : result.mode === "semantic" ? "semántica" : "léxica"}</p>
+        <div className="flex items-center gap-1.5">
+          <button className="button-secondary px-2.5 py-1.5 text-[11px]" disabled={selected.size === 0} onClick={() => void copyForWeb()} title="Copia solo los extractos marcados; no se envía nada automáticamente">
+            <ClipboardCopy className="size-3" /> {copied ? "Copiado" : `Copiar ${selected.size} para ChatGPT/Claude web`}
+          </button>
+          <button className="button-secondary px-2.5 py-1.5 text-[11px]" onClick={() => void openUrl("https://chatgpt.com/")}><ExternalLink className="size-3" /> ChatGPT</button>
+          <button className="button-secondary px-2.5 py-1.5 text-[11px]" onClick={() => void openUrl("https://claude.ai/new")}><ExternalLink className="size-3" /> Claude</button>
+        </div>
+      </div>
+      {selected.size > 0 && <p className="mt-1 text-[10px] text-amber-700">Lo que pegues en un servicio web sale de tu equipo bajo sus condiciones. Revisa que no incluya material confidencial.</p>}
       {result.warnings.map((warning) => <p key={warning} className="mt-1 text-[11px] text-amber-700">{warning}</p>)}
       <ol className="mt-3 space-y-3">
         {result.chunks.map((chunk) => (
           <li key={chunk.chunkId} className="panel p-4">
             <div className="flex items-start justify-between gap-3">
-              <Link className="text-xs font-semibold text-slate-700 hover:text-teal-700" to={evidenceLink(chunk.articleId, chunk.page)}>{chunk.articleTitle}</Link>
+              <label className="flex min-w-0 items-start gap-2">
+                <input type="checkbox" className="mt-0.5 accent-teal-600" checked={selected.has(chunk.chunkId)} onChange={(event) => { setCopied(false); setSelected((current) => { const next = new Set(current); if (event.target.checked) next.add(chunk.chunkId); else next.delete(chunk.chunkId); return next; }); }} aria-label={`Seleccionar extracto de ${chunk.articleTitle}, página ${chunk.page}`} />
+                <Link className="text-xs font-semibold text-slate-700 hover:text-teal-700" to={evidenceLink(chunk.articleId, chunk.page)}>{chunk.articleTitle}</Link>
+              </label>
               <span className="shrink-0 text-[10px] text-slate-400">p. {chunk.page}{chunk.lexicalRank ? ` · léxico #${chunk.lexicalRank}` : ""}{chunk.semanticRank ? ` · semántico #${chunk.semanticRank}` : ""}</span>
             </div>
             {chunk.section && <p className="mt-0.5 text-[10px] text-slate-400">{chunk.section}</p>}

@@ -1,6 +1,7 @@
 import { FormEvent, useCallback, useEffect, useState } from "react";
-import { Check, Database, Download, HardDrive, LoaderCircle, RefreshCw, ScanText, ShieldCheck, Sparkles, TriangleAlert } from "lucide-react";
+import { Check, Cloud, Database, Download, HardDrive, LoaderCircle, RefreshCw, ScanText, ShieldCheck, Sparkles, TriangleAlert } from "lucide-react";
 import { AiSettings } from "../components/settings/AiSettings";
+import { ExternalLogPanel, ExternalProviders } from "../components/settings/ExternalProviders";
 import { backend, errorMessage } from "../lib/backend";
 import { onJobChanged } from "../lib/events";
 import { jobStatusLabels } from "../lib/extraction";
@@ -71,11 +72,12 @@ export function SettingsPage({ settings, databasePath, saveSettings }: Props) {
           title="Permitir procesamiento externo"
           detail="Autorización global; cada flujo deberá volver a confirmar el envío."
         />
+        <ExternalLogPanel />
       </SettingsSection>
 
       <SettingsSection icon={Sparkles} title="Inteligencia artificial" description="Ollama local por defecto. Los modelos se descubren del servidor; guarda los cambios al final de la página.">
         <div className="mb-5 grid grid-cols-2 gap-4">
-          <label className="label">Proveedor
+          <label className="label">Proveedor predeterminado del asistente
             <select className="input mt-1.5" value={form.aiProvider} onChange={(event) => setForm({ ...form, aiProvider: event.target.value as AppSettings["aiProvider"] })}>
               <option value="ollama">Ollama (local)</option><option value="openai">OpenAI</option><option value="anthropic">Anthropic</option>
             </select>
@@ -88,6 +90,10 @@ export function SettingsPage({ settings, databasePath, saveSettings }: Props) {
         {form.aiProvider !== "ollama" && !form.allowExternalProcessing && (
           <p className="mt-3 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800">El proveedor está seleccionado, pero los envíos externos siguen bloqueados.</p>
         )}
+      </SettingsSection>
+
+      <SettingsSection icon={Cloud} title="Proveedores externos (opcional)" description="OpenAI y Anthropic por sus API oficiales. Claves en el Llavero; cada envío requiere tu confirmación con coste estimado.">
+        <ExternalProviders form={form} setForm={setForm} />
       </SettingsSection>
 
       <SettingsSection icon={ScanText} title="Extracción científica" description="Sidecar Python local: diseño de página, OCR opcional y GROBID opcional en este equipo.">

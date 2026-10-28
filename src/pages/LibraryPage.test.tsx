@@ -22,6 +22,7 @@ describe("LibraryPage", () => {
             importedAt: "2026-10-28T00:00:00Z",
             updatedAt: "2026-10-28T00:00:00Z",
             collectionIds: [],
+            confidential: false,
           }]}
           collections={[]}
           importPdfFiles={vi.fn()}

@@ -16,9 +16,11 @@ use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
 use crate::{
+    ai_gateway::{ArticleRef, ChatProvider, ExternalConsent, ExternalEstimate, cost_usd, pricing},
     db::{Database, now},
     error::{AppError, AppResult},
-    ollama::{ChatRequest, OllamaClient},
+    models::AppSettings,
+    ollama::ChatRequest,
 };
 
 pub const ANSWER_PROMPT_VERSION: &str = "rag-answer-v1";
@@ -206,6 +208,8 @@ pub struct SearchScope {
     pub article_ids: Option<Vec<String>>,
     pub year_from: Option<i64>,
     pub year_to: Option<i64>,
+    /// Set for external providers: confidential articles never leave the machine.
+    pub exclude_confidential: bool,
 }
 
 impl SearchScope {
@@ -247,11 +251,18 @@ impl VectorIndex for SqliteBruteForceIndex {
              JOIN articles a ON a.id = c.article_id AND a.deleted_at IS NULL
              WHERE (?2 IS NULL OR c.article_id IN (SELECT value FROM json_each(?2)))
                AND (?3 IS NULL OR a.publication_year >= ?3)
-               AND (?4 IS NULL OR a.publication_year <= ?4)",
+               AND (?4 IS NULL OR a.publication_year <= ?4)
+               AND (?5 = 0 OR a.confidential = 0)",
         )?;
         let mut scored: Vec<(String, f32)> = statement
             .query_map(
-                params![model, scope.ids_json(), scope.year_from, scope.year_to],
+                params![
+                    model,
+                    scope.ids_json(),
+                    scope.year_from,
+                    scope.year_to,
+                    scope.exclude_confidential
+                ],
                 |row| {
                     let vector: Vec<u8> = row.get(1)?;
                     Ok((row.get::<_, String>(0)?, vector))
@@ -352,6 +363,7 @@ impl Database {
                    AND (?2 IS NULL OR c.article_id IN (SELECT value FROM json_each(?2)))
                    AND (?3 IS NULL OR a.publication_year >= ?3)
                    AND (?4 IS NULL OR a.publication_year <= ?4)
+                   AND (?6 = 0 OR a.confidential = 0)
                  ORDER BY bm25(document_chunks_fts) LIMIT ?5",
             )?;
             lexical = statement
@@ -361,7 +373,8 @@ impl Database {
                         scope.ids_json(),
                         scope.year_from,
                         scope.year_to,
-                        CANDIDATES_PER_RETRIEVER as i64
+                        CANDIDATES_PER_RETRIEVER as i64,
+                        scope.exclude_confidential
                     ],
                     |row| row.get(0),
                 )?
@@ -455,6 +468,7 @@ impl Database {
             article_ids,
             year_from,
             year_to,
+            exclude_confidential: false,
         })
     }
 }
@@ -639,11 +653,13 @@ pub fn answer_schema() -> Value {
                 "items": {
                     "type": "object",
                     "properties": { "source": { "type": "string" }, "quote": { "type": "string" } },
-                    "required": ["source", "quote"]
+                    "required": ["source", "quote"],
+                    "additionalProperties": false
                 }
             }
         },
-        "required": ["found", "answer", "citations"]
+        "required": ["found", "answer", "citations"],
+        "additionalProperties": false
     })
 }
 
@@ -691,7 +707,7 @@ pub const UNSUPPORTED_MESSAGE: &str = "El modelo propuso una respuesta, pero nin
 
 /// Ask the model and keep only verifiable output; retries on malformed JSON or unverifiable citations.
 pub fn answer_with_citations(
-    client: &OllamaClient,
+    client: &dyn ChatProvider,
     model: &str,
     question: &str,
     chunks: &[RetrievedChunk],
@@ -785,6 +801,11 @@ pub struct AskInput {
     pub year_to: Option<i64>,
     pub question: String,
     pub model: Option<String>,
+    /// `ollama` (default), `openai` or `anthropic`.
+    #[serde(default)]
+    pub provider: Option<String>,
+    #[serde(default)]
+    pub consent: Option<ExternalConsent>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -822,55 +843,22 @@ pub struct ConversationDetail {
 }
 
 impl Database {
-    pub fn ask_assistant(
+    /// Retrieval for a question, honoring the confidentiality rule for external providers.
+    fn retrieve_for_question(
         &self,
         input: &AskInput,
+        settings: &AppSettings,
         embed: &dyn Fn(&str) -> Option<Vec<f32>>,
-        client: &OllamaClient,
-        cancelled: &dyn Fn() -> bool,
-    ) -> AppResult<ConversationDetail> {
-        let question = input.question.trim();
-        if question.chars().count() < 3 || question.chars().count() > 4000 {
-            return Err(AppError::Validation(
-                "La pregunta debe tener entre 3 y 4000 caracteres".into(),
-            ));
-        }
-        let settings = self.settings()?;
-        let model = input
-            .model
-            .as_deref()
-            .map(str::trim)
-            .filter(|model| !model.is_empty())
-            .unwrap_or(settings.ollama_model.trim())
-            .to_owned();
-        if model.is_empty() {
-            return Err(AppError::Ai(
-                "Elige un modelo de chat de Ollama en Configuración → Inteligencia artificial"
-                    .into(),
-            ));
-        }
-        let scope = self.resolve_scope(
+        external: bool,
+    ) -> AppResult<(Vec<RetrievedChunk>, Value)> {
+        let mut scope = self.resolve_scope(
             &input.scope_type,
             input.scope_id.as_deref(),
             input.year_from,
             input.year_to,
         )?;
-        let conversation_id = match &input.conversation_id {
-            Some(id) => id.clone(),
-            None => {
-                self.create_conversation(question, &input.scope_type, input.scope_id.as_deref())?
-            }
-        };
-        self.insert_message(
-            &conversation_id,
-            "user",
-            question,
-            "question",
-            &[],
-            &Value::Null,
-            None,
-        )?;
-
+        scope.exclude_confidential = external;
+        let question = input.question.trim();
         let vector = if settings.rag_mode == "lexical"
             || settings.ollama_embedding_model.trim().is_empty()
         {
@@ -897,11 +885,131 @@ impl Database {
         let sources = json!({
             "mode": search.mode,
             "warnings": search.warnings,
+            "external": external,
             "chunks": chunks.iter().enumerate().map(|(index, chunk)| json!({
                 "source": format!("S{}", index + 1), "articleId": chunk.article_id, "articleTitle": chunk.article_title,
                 "page": chunk.page, "section": chunk.section, "score": chunk.score,
             })).collect::<Vec<_>>(),
         });
+        Ok((chunks, sources))
+    }
+
+    /// What an external question would send and cost, without sending anything.
+    pub fn estimate_assistant(
+        &self,
+        input: &AskInput,
+        provider: &str,
+        model: &str,
+        embed: &dyn Fn(&str) -> Option<Vec<f32>>,
+    ) -> AppResult<ExternalEstimate> {
+        let settings = self.settings()?;
+        let (chunks, _) = self.retrieve_for_question(input, &settings, embed, true)?;
+        let (all, _) = self.retrieve_for_question(input, &settings, embed, false)?;
+        let excluded = all
+            .iter()
+            .filter(|chunk| !chunks.iter().any(|kept| kept.chunk_id == chunk.chunk_id))
+            .count() as i64;
+        self.estimate_for_chunks(
+            &settings,
+            provider,
+            model,
+            input.question.trim(),
+            &chunks,
+            excluded,
+        )
+    }
+
+    fn estimate_for_chunks(
+        &self,
+        settings: &AppSettings,
+        provider: &str,
+        model: &str,
+        question: &str,
+        chunks: &[RetrievedChunk],
+        excluded: i64,
+    ) -> AppResult<ExternalEstimate> {
+        let mut articles: Vec<ArticleRef> = Vec::new();
+        for chunk in chunks {
+            if !articles
+                .iter()
+                .any(|article| article.id == chunk.article_id)
+            {
+                articles.push(ArticleRef {
+                    id: chunk.article_id.clone(),
+                    title: chunk.article_title.clone(),
+                });
+            }
+        }
+        let input_tokens = (estimate_tokens(ANSWER_SYSTEM_PROMPT)
+            + estimate_tokens(&documents_block(chunks))
+            + estimate_tokens(question)
+            + 50) as i64;
+        self.external_estimate(
+            settings,
+            provider,
+            model,
+            1,
+            input_tokens,
+            MAX_ATTEMPTS as i64,
+            articles,
+            excluded,
+            chunks.len() as i64,
+        )
+    }
+
+    pub fn ask_assistant(
+        &self,
+        input: &AskInput,
+        embed: &dyn Fn(&str) -> Option<Vec<f32>>,
+        client: &dyn ChatProvider,
+        model: &str,
+        consent: Option<&ExternalConsent>,
+        cancelled: &dyn Fn() -> bool,
+    ) -> AppResult<ConversationDetail> {
+        let question = input.question.trim();
+        if question.chars().count() < 3 || question.chars().count() > 4000 {
+            return Err(AppError::Validation(
+                "La pregunta debe tener entre 3 y 4000 caracteres".into(),
+            ));
+        }
+        let settings = self.settings()?;
+        let external = client.is_external();
+        let (chunks, sources) = self.retrieve_for_question(input, &settings, embed, external)?;
+        // The consent is checked against the real context before anything is stored or sent.
+        let estimate = if external {
+            let estimate = self.estimate_for_chunks(
+                &settings,
+                client.provider(),
+                model,
+                question,
+                &chunks,
+                0,
+            )?;
+            self.check_consent(
+                &estimate,
+                consent.ok_or_else(|| {
+                    AppError::Ai("Falta la confirmación del envío externo".into())
+                })?,
+            )?;
+            Some(estimate)
+        } else {
+            None
+        };
+        let conversation_id = match &input.conversation_id {
+            Some(id) => id.clone(),
+            None => {
+                self.create_conversation(question, &input.scope_type, input.scope_id.as_deref())?
+            }
+        };
+        self.insert_message(
+            &conversation_id,
+            "user",
+            question,
+            "question",
+            &[],
+            &Value::Null,
+            None,
+        )?;
         if chunks.is_empty() {
             let message = if self.chunk_count()? == 0 {
                 "La biblioteca aún no está indexada. Importa artículos o ejecuta «Indexar biblioteca» en Configuración."
@@ -923,7 +1031,7 @@ impl Database {
         let system_and_user_hash =
             sha256_hex(format!("{ANSWER_SYSTEM_PROMPT}{}", documents_block(&chunks)).as_bytes());
         let run_id = Uuid::new_v4().to_string();
-        let result = answer_with_citations(client, &model, question, &chunks, cancelled);
+        let result = answer_with_citations(client, model, question, &chunks, cancelled);
         let connection = self.open()?;
         let (status, output, error) = match &result {
             Ok(outcome) => (
@@ -939,17 +1047,32 @@ impl Database {
             Err(error) => ("failed", Value::Null, Some(error.to_string())),
         };
         let outcome = result.as_ref().ok();
+        let cost = if external {
+            cost_usd(
+                pricing(&connection, client.provider(), model)?,
+                outcome
+                    .and_then(|outcome| outcome.prompt_tokens)
+                    .unwrap_or(0),
+                outcome
+                    .and_then(|outcome| outcome.completion_tokens)
+                    .unwrap_or(0),
+            )
+        } else {
+            None
+        };
         connection.execute(
             "INSERT INTO ai_runs (id, provider, model, operation, prompt_sha256, input_sha256, output_json,
                                   external_processing_authorized, created_at, status, prompt_version, duration_ms,
-                                  prompt_tokens, completion_tokens, attempts, error_message)
-             VALUES (?1, 'ollama', ?2, 'assistant_answer', ?3, ?4, ?5, 0, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
+                                  prompt_tokens, completion_tokens, attempts, error_message, cost_usd, estimated_cost_usd)
+             VALUES (?1, ?2, ?3, 'assistant_answer', ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)",
             params![
                 run_id,
+                client.provider(),
                 model,
                 system_and_user_hash,
                 sha256_hex(question.as_bytes()),
                 output.to_string(),
+                external,
                 now(),
                 status,
                 ANSWER_PROMPT_VERSION,
@@ -958,6 +1081,8 @@ impl Database {
                 outcome.and_then(|outcome| outcome.completion_tokens),
                 outcome.map_or(1, |outcome| outcome.attempts as i64),
                 error,
+                cost,
+                estimate.as_ref().and_then(|estimate| estimate.expected_cost_usd),
             ],
         )?;
         match result {

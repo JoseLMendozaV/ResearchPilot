@@ -50,12 +50,12 @@ export default function App() {
             <>
               <Route path="/" element={<DashboardPage data={app.data} />} />
               <Route path="/biblioteca" element={<LibraryPage articles={app.data.articles} collections={app.data.collections} importPdfFiles={app.importPdfFiles} importReferenceFiles={app.importReferenceFiles} searchLibrary={app.searchLibrary} archiveArticle={app.archiveArticle} createCollection={app.createCollection} />} />
-              <Route path="/biblioteca/:articleId" element={<ArticleRoute articles={app.data.articles} collections={app.data.collections} updateMetadata={app.updateArticleMetadata} setArticleCollection={app.setArticleCollection} />} />
+              <Route path="/biblioteca/:articleId" element={<ArticleRoute articles={app.data.articles} collections={app.data.collections} updateMetadata={app.updateArticleMetadata} setArticleCollection={app.setArticleCollection} refresh={app.refreshQuietly} />} />
               <Route path="/revisiones" element={<ReviewsPage projects={app.data.projects} createProject={app.createProject} />} />
               <Route path="/protocolo" element={<ProtocolPage />} />
               <Route path="/evidencia" element={<EvidencePage stats={app.data.stats} />} />
               <Route path="/tareas" element={<TasksPage {...jobs} />} />
-              <Route path="/asistente" element={<AssistantPage articles={app.data.articles} collections={app.data.collections} defaultModel={app.data.settings.ollamaModel} />} />
+              <Route path="/asistente" element={<AssistantPage articles={app.data.articles} collections={app.data.collections} settings={app.data.settings} />} />
               <Route path="/configuracion" element={<SettingsPage settings={app.data.settings} databasePath={app.data.databasePath} saveSettings={app.saveSettings} />} />
               <Route path="*" element={<Navigate to="/" replace />} />
             </>
@@ -67,8 +67,8 @@ export default function App() {
   );
 }
 
-function ArticleRoute({ articles, collections, updateMetadata, setArticleCollection }: { articles: import("./types").LibraryArticle[]; collections: import("./types").LibraryCollection[]; updateMetadata: (input: import("./types").UpdateArticleMetadataInput) => Promise<import("./types").LibraryArticle>; setArticleCollection: (articleId: string, collectionId: string, included: boolean) => Promise<void> }) {
+function ArticleRoute({ articles, collections, updateMetadata, setArticleCollection, refresh }: { refresh: () => Promise<void>; articles: import("./types").LibraryArticle[]; collections: import("./types").LibraryCollection[]; updateMetadata: (input: import("./types").UpdateArticleMetadataInput) => Promise<import("./types").LibraryArticle>; setArticleCollection: (articleId: string, collectionId: string, included: boolean) => Promise<void> }) {
   const { articleId } = useParams();
   const article = articles.find((item) => item.id === articleId);
-  return article ? <Suspense fallback={<LoadingView />}><ArticleViewerPage article={article} collections={collections} updateMetadata={updateMetadata} setArticleCollection={setArticleCollection} /></Suspense> : <Navigate to="/biblioteca" replace />;
+  return article ? <Suspense fallback={<LoadingView />}><ArticleViewerPage article={article} collections={collections} updateMetadata={updateMetadata} setArticleCollection={setArticleCollection} refresh={refresh} /></Suspense> : <Navigate to="/biblioteca" replace />;
 }

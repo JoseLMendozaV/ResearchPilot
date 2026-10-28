@@ -23,9 +23,11 @@ use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
 use crate::{
+    ai_gateway::{Endpoints, ExternalConsent, chat_provider, resolve_model},
     db::{Database, now},
     error::{AppError, AppResult},
     models::{AppSettings, EnqueueResult, JobSummary},
+    secrets::{KeychainStore, SecretStore},
     worker::{self, PROTOCOL_VERSION, RULESET_VERSION, WORKER_VERSION, WorkerEnvironment},
 };
 
@@ -84,10 +86,28 @@ struct Inner {
     shutdown: AtomicBool,
     /// Upper bound for child timeouts; only lowered by tests.
     timeout_cap: Mutex<Duration>,
+    secrets: Arc<dyn SecretStore>,
+    endpoints: Endpoints,
 }
 
 impl JobRunner {
     pub fn new(database: Database, environment: WorkerEnvironment, notifier: JobNotifier) -> Self {
+        Self::with_gateway(
+            database,
+            environment,
+            notifier,
+            Arc::new(KeychainStore),
+            Endpoints::default(),
+        )
+    }
+
+    pub fn with_gateway(
+        database: Database,
+        environment: WorkerEnvironment,
+        notifier: JobNotifier,
+        secrets: Arc<dyn SecretStore>,
+        endpoints: Endpoints,
+    ) -> Self {
         Self {
             inner: Arc::new(Inner {
                 database,
@@ -98,6 +118,8 @@ impl JobRunner {
                 notifier,
                 shutdown: AtomicBool::new(false),
                 timeout_cap: Mutex::new(Duration::MAX),
+                secrets,
+                endpoints,
             }),
         }
     }
@@ -241,9 +263,44 @@ impl JobRunner {
         let article_id = job.article_id.as_deref().unwrap_or_default();
         let result = match job.job_type.as_str() {
             INDEX_JOB => database.index_article(article_id, &settings, &progress, &cancelled),
-            AI_FIELDS_JOB => database.run_ai_fields(
-                &job.id, article_id, &settings, &embed, &progress, &cancelled,
-            ),
+            AI_FIELDS_JOB => (|| {
+                let input: Value = database
+                    .open()?
+                    .query_row(
+                        "SELECT input_json FROM ingestion_jobs WHERE id = ?1",
+                        [&job.id],
+                        |row| row.get::<_, String>(0),
+                    )
+                    .map(|text| serde_json::from_str(&text).unwrap_or(Value::Null))?;
+                let provider = input["provider"]
+                    .as_str()
+                    .filter(|provider| !provider.is_empty())
+                    .unwrap_or("ollama");
+                let model = resolve_model(&settings, provider, input["model"].as_str(), "fields")?;
+                let consent: Option<ExternalConsent> =
+                    serde_json::from_value(input["consent"].clone())
+                        .ok()
+                        .flatten();
+                let client = chat_provider(
+                    &settings,
+                    provider,
+                    &model,
+                    consent.as_ref(),
+                    self.inner.secrets.as_ref(),
+                    &self.inner.endpoints,
+                )?;
+                database.run_ai_fields(
+                    &job.id,
+                    article_id,
+                    &settings,
+                    &embed,
+                    client.as_ref(),
+                    &model,
+                    consent.as_ref(),
+                    &progress,
+                    &cancelled,
+                )
+            })(),
             _ => self.run_model_pull(job, &settings, &progress, &cancelled),
         };
         match result {

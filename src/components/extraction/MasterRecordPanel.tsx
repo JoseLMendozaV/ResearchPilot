@@ -3,7 +3,7 @@ import { ChevronDown, LoaderCircle, MessageSquareText, Pause, Plus, RefreshCw, S
 import { Link } from "react-router-dom";
 import { backend, errorMessage } from "../../lib/backend";
 import { formatDateTime, groupLabels, jobStatusLabels, statusLabels } from "../../lib/extraction";
-import type { AddMasterValueInput, ArticleExtraction, EvidenceItem, FieldGroup, JobSummary, MasterField, MasterValue } from "../../types";
+import type { AiProvider, AddMasterValueInput, ArticleExtraction, EvidenceItem, FieldGroup, JobSummary, MasterField, MasterValue } from "../../types";
 import { ValueCard } from "./ValueCard";
 
 type Filter = "with_values" | "review" | "all";
@@ -14,7 +14,7 @@ interface Props {
   onExtract: (force: boolean) => Promise<void>;
   onJobAction: (action: "pause" | "cancel") => Promise<void>;
   /** Queue local-model proposals for open narrative fields. */
-  onProposeWithAi?: () => Promise<void>;
+  onProposeWithAi?: (provider: AiProvider) => Promise<void>;
   aiJob?: JobSummary;
   onValueChanged: (value: MasterValue) => void;
   onShowEvidence: (evidence: EvidenceItem) => void;
@@ -24,6 +24,7 @@ export function MasterRecordPanel({ articleId, extraction, onExtract, onJobActio
   const [filter, setFilter] = useState<Filter>("with_values");
   const [collapsed, setCollapsed] = useState<Set<FieldGroup>>(new Set());
   const [busy, setBusy] = useState(false);
+  const [aiProvider, setAiProvider] = useState<AiProvider>("ollama");
   const [error, setError] = useState<string | null>(null);
   const run = extraction.runs.find((item) => item.provider !== "ollama") ?? extraction.runs[0];
   const aiRun = extraction.runs.find((item) => item.provider === "ollama");
@@ -119,9 +120,16 @@ export function MasterRecordPanel({ articleId, extraction, onExtract, onJobActio
         {run?.status === "completed" && !job && (
           <div className="mt-3 flex flex-wrap gap-2 border-t border-slate-200/70 pt-3">
             {onProposeWithAi && (
-              <button className="button-secondary px-2.5 py-1.5 text-[11px]" disabled={busy || Boolean(aiJob)} onClick={() => void act(onProposeWithAi)} title="Un modelo local de Ollama propone los campos narrativos vacíos; solo se guardan propuestas con cita verificada">
-                <Sparkles className="size-3" /> Proponer campos con IA local
-              </button>
+              <span className="flex items-center gap-1">
+                <button className="button-secondary px-2.5 py-1.5 text-[11px]" disabled={busy || Boolean(aiJob)} onClick={() => void act(() => onProposeWithAi(aiProvider))} title="Un modelo de IA propone los campos narrativos vacíos; solo se guardan propuestas con cita verificada">
+                  <Sparkles className="size-3" /> Proponer campos con IA
+                </button>
+                <select className="input w-28 px-2 py-1.5 text-[11px]" value={aiProvider} onChange={(event) => setAiProvider(event.target.value as AiProvider)} aria-label="Proveedor para las propuestas">
+                  <option value="ollama">Local</option>
+                  <option value="openai">OpenAI</option>
+                  <option value="anthropic">Anthropic</option>
+                </select>
+              </span>
             )}
             <Link className="button-secondary px-2.5 py-1.5 text-[11px]" to={`/asistente?scope=article&id=${articleId}`}><MessageSquareText className="size-3" /> Preguntar a este artículo</Link>
           </div>

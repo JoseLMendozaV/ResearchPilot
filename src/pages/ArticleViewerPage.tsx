@@ -1,22 +1,24 @@
 import { FormEvent, useCallback, useEffect, useState } from "react";
 import { ArrowLeft, Check, ClipboardCheck, Edit3, FileKey2, Folder, LoaderCircle, Save, X } from "lucide-react";
 import { Link, useSearchParams } from "react-router-dom";
+import { ExternalConsentDialog } from "../components/ExternalConsentDialog";
 import { PdfViewer } from "../components/PdfViewer";
 import { MasterRecordPanel } from "../components/extraction/MasterRecordPanel";
 import { StructurePanel } from "../components/extraction/StructurePanel";
 import { backend, errorMessage } from "../lib/backend";
 import { onJobChanged } from "../lib/events";
-import type { ArticleExtraction, EvidenceItem, JobSummary, LibraryArticle, LibraryCollection, MasterValue, UpdateArticleMetadataInput, ViewerFocus } from "../types";
+import type { AiProvider, ArticleExtraction, EvidenceItem, ExternalConsent, ExternalEstimate, JobSummary, LibraryArticle, LibraryCollection, MasterValue, UpdateArticleMetadataInput, ViewerFocus } from "../types";
 
 type Tab = "record" | "structure" | "metadata";
 
-export function ArticleViewerPage({ article, collections, updateMetadata, setArticleCollection }: { article: LibraryArticle; collections: LibraryCollection[]; updateMetadata: (input: UpdateArticleMetadataInput) => Promise<LibraryArticle>; setArticleCollection: (articleId: string, collectionId: string, included: boolean) => Promise<void> }) {
+export function ArticleViewerPage({ article, collections, updateMetadata, setArticleCollection, refresh }: { refresh: () => Promise<void>; article: LibraryArticle; collections: LibraryCollection[]; updateMetadata: (input: UpdateArticleMetadataInput) => Promise<LibraryArticle>; setArticleCollection: (articleId: string, collectionId: string, included: boolean) => Promise<void> }) {
   const [searchParams] = useSearchParams();
   const [tab, setTab] = useState<Tab>("record");
   const [extraction, setExtraction] = useState<ArticleExtraction | null>(null);
   const [extractionError, setExtractionError] = useState<string | null>(null);
   const [focus, setFocus] = useState<ViewerFocus | undefined>();
   const [aiJob, setAiJob] = useState<JobSummary | undefined>();
+  const [consentEstimate, setConsentEstimate] = useState<ExternalEstimate | null>(null);
 
   const loadExtraction = useCallback(async () => {
     try {
@@ -68,8 +70,17 @@ export function ArticleViewerPage({ article, collections, updateMetadata, setArt
     setFocus({ page: pageParam, bbox: bbox?.length === 4 ? bbox : undefined, pageWidth: widthParam, key: Date.now() });
   }, [pageParam, bboxParam, widthParam]);
 
-  async function proposeWithAi() {
-    setAiJob(await backend.enqueueAiFields(article.id));
+  async function proposeWithAi(provider: AiProvider) {
+    if (provider === "ollama") {
+      setAiJob(await backend.enqueueAiFields(article.id, "ollama"));
+      return;
+    }
+    setConsentEstimate(await backend.estimateAiFields(article.id, provider));
+  }
+
+  async function confirmExternal(consent: ExternalConsent) {
+    setConsentEstimate(null);
+    setAiJob(await backend.enqueueAiFields(article.id, consent.provider, consent.model, consent));
   }
 
   const showEvidence = (evidence: EvidenceItem) => {
@@ -100,6 +111,14 @@ export function ArticleViewerPage({ article, collections, updateMetadata, setArt
 
   return (
     <div className="flex h-full min-h-0">
+      {consentEstimate && (
+        <ExternalConsentDialog
+          estimate={consentEstimate}
+          purpose={`Vas a pedir propuestas para ${consentEstimate.requests} campo(s) de la ficha de este artículo.`}
+          onCancel={() => setConsentEstimate(null)}
+          onConfirm={(consent) => void confirmExternal(consent)}
+        />
+      )}
       <section className="min-w-0 flex-1 border-r border-slate-200">
         {article.documentPath ? (
           <PdfViewer path={article.documentPath} title={article.title} focus={focus} />
@@ -127,7 +146,7 @@ export function ArticleViewerPage({ article, collections, updateMetadata, setArt
             <StructurePanel extraction={extraction} onShowPage={(page, bbox) => setFocus({ page, bbox, key: Date.now() })} />
           )}
           {tab === "metadata" && (
-            <MetadataPanel article={article} collections={collections} extraction={extraction} updateMetadata={updateMetadata} setArticleCollection={setArticleCollection} />
+            <MetadataPanel article={article} collections={collections} extraction={extraction} updateMetadata={updateMetadata} setArticleCollection={setArticleCollection} onChanged={refresh} />
           )}
         </div>
       </aside>
@@ -135,7 +154,7 @@ export function ArticleViewerPage({ article, collections, updateMetadata, setArt
   );
 }
 
-function MetadataPanel({ article, collections, extraction, updateMetadata, setArticleCollection }: { article: LibraryArticle; collections: LibraryCollection[]; extraction: ArticleExtraction | null; updateMetadata: (input: UpdateArticleMetadataInput) => Promise<LibraryArticle>; setArticleCollection: (articleId: string, collectionId: string, included: boolean) => Promise<void> }) {
+function MetadataPanel({ article, collections, extraction, updateMetadata, setArticleCollection, onChanged }: { onChanged: () => Promise<void>; article: LibraryArticle; collections: LibraryCollection[]; extraction: ArticleExtraction | null; updateMetadata: (input: UpdateArticleMetadataInput) => Promise<LibraryArticle>; setArticleCollection: (articleId: string, collectionId: string, included: boolean) => Promise<void> }) {
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -169,6 +188,16 @@ function MetadataPanel({ article, collections, extraction, updateMetadata, setAr
       setError(errorMessage(cause));
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function toggleConfidential(confidential: boolean) {
+    setError(null);
+    try {
+      await backend.setArticleConfidential(article.id, confidential);
+      await onChanged();
+    } catch (cause) {
+      setError(errorMessage(cause));
     }
   }
 
@@ -224,6 +253,10 @@ function MetadataPanel({ article, collections, extraction, updateMetadata, setAr
           {collections.length > 0 && <div className="mt-6 border-t border-slate-100 pt-5"><h3 className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.12em] text-slate-400"><Folder className="size-3.5" /> Colecciones</h3><div className="mt-3 space-y-2">{collections.map((collection) => <label key={collection.id} className="flex items-center gap-2 text-xs text-slate-600"><input type="checkbox" className="accent-teal-600" checked={article.collectionIds.includes(collection.id)} onChange={(event) => void toggleCollection(collection.id, event.target.checked)} /> {collection.name}</label>)}</div></div>}
           {article.abstractText && <div className="mt-6"><h3 className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">Resumen</h3><p className="mt-2 text-xs leading-6 text-slate-500">{article.abstractText}</p></div>}
           {error && <p className="mt-4 rounded-lg bg-rose-50 p-3 text-xs text-rose-700">{error}</p>}
+          <label className="mt-6 flex items-start gap-2 rounded-xl border border-slate-100 p-3 text-xs text-slate-600">
+            <input type="checkbox" className="mt-0.5 accent-teal-600" checked={article.confidential} onChange={(event) => void toggleConfidential(event.target.checked)} />
+            <span><span className="font-semibold">Confidencial</span><span className="mt-0.5 block text-[11px] text-slate-400">Nunca se envía a proveedores de IA externos, aunque estén autorizados.</span></span>
+          </label>
           {article.documentSha256 && <div className="mt-6 rounded-xl bg-slate-50 p-3"><div className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.1em] text-slate-400"><FileKey2 className="size-3.5" /> SHA-256</div><p className="mt-2 break-all font-mono text-[9px] leading-4 text-slate-500">{article.documentSha256}</p></div>}
         </div>
       )}

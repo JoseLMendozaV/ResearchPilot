@@ -6,20 +6,19 @@
 //! `not_reported`. Values land as `proposed` with origin `ai` and follow the
 //! same review, history and audit flow as rule-based proposals.
 
-use std::time::Duration;
-
 use rusqlite::{OptionalExtension, params};
 use serde::Deserialize;
 use serde_json::{Value, json};
 use uuid::Uuid;
 
 use crate::{
+    ai_gateway::{ArticleRef, ChatProvider, ExternalConsent, ExternalEstimate, cost_usd, pricing},
     db::{Database, now},
     error::{AppError, AppResult},
     extraction::{field_catalog, flag_conflicts, insert_revision, parse_value},
     jobs::AI_FIELDS_JOB,
     models::{AppSettings, JobSummary},
-    ollama::{ChatRequest, OllamaClient},
+    ollama::ChatRequest,
     rag::{
         RetrievedChunk, documents_block, escape_untrusted, estimate_tokens, load_chunk,
         verify_citation,
@@ -252,7 +251,13 @@ enum FieldOutcome {
 }
 
 impl Database {
-    pub fn enqueue_ai_fields(&self, article_id: &str) -> AppResult<JobSummary> {
+    pub fn enqueue_ai_fields(
+        &self,
+        article_id: &str,
+        provider: &str,
+        model: &str,
+        consent: Option<&ExternalConsent>,
+    ) -> AppResult<JobSummary> {
         let connection = self.open()?;
         let active: Option<String> = connection
             .query_row(
@@ -278,10 +283,51 @@ impl Database {
         let timestamp = now();
         connection.execute(
             "INSERT INTO ingestion_jobs (id, article_id, job_type, status, progress, input_json, message, max_attempts, created_at, updated_at)
-             VALUES (?1, ?2, ?3, 'queued', 0, '{}', 'En cola', 1, ?4, ?4)",
-            params![job_id, article_id, AI_FIELDS_JOB, timestamp],
+             VALUES (?1, ?2, ?3, 'queued', 0, ?5, 'En cola', 1, ?4, ?4)",
+            params![job_id, article_id, AI_FIELDS_JOB, timestamp, json!({ "provider": provider, "model": model, "consent": consent }).to_string()],
         )?;
         self.job_summary(&job_id)
+    }
+
+    /// What proposing the open fields with an external model would send and cost.
+    pub fn estimate_ai_fields(
+        &self,
+        article_id: &str,
+        provider: &str,
+        model: &str,
+    ) -> AppResult<ExternalEstimate> {
+        let settings = self.settings()?;
+        let connection = self.open()?;
+        let (title, confidential, average_chunk): (String, bool, f64) = connection.query_row(
+            "SELECT a.title, a.confidential, COALESCE((SELECT AVG(length(text)) FROM document_chunks WHERE article_id = a.id), 0)
+             FROM articles a WHERE a.id = ?1 AND a.deleted_at IS NULL",
+            [article_id],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )?;
+        if confidential {
+            return Err(AppError::Ai(
+                "Este artículo está marcado como confidencial: no se envía a proveedores externos."
+                    .into(),
+            ));
+        }
+        let fields = self.pending_ai_fields(article_id)?.len() as i64;
+        let per_request = (estimate_tokens(SYSTEM_PROMPT) as f64
+            + 4.0 * (average_chunk / 4.0 + 40.0)
+            + 120.0) as i64;
+        self.external_estimate(
+            &settings,
+            provider,
+            model,
+            fields,
+            per_request,
+            2,
+            vec![ArticleRef {
+                id: article_id.to_owned(),
+                title,
+            }],
+            0,
+            4 * fields,
+        )
     }
 
     /// Fields worth asking: no live value other than `not_found`/`rejected`.
@@ -302,29 +348,37 @@ impl Database {
         Ok(pending)
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn run_ai_fields(
         &self,
         job_id: &str,
         article_id: &str,
         settings: &AppSettings,
         embed: &dyn Fn(&str) -> Option<Vec<f32>>,
+        client: &dyn ChatProvider,
+        model: &str,
+        consent: Option<&ExternalConsent>,
         progress: &dyn Fn(f64, &str) -> AppResult<()>,
         cancelled: &dyn Fn() -> bool,
     ) -> AppResult<String> {
-        let model = if settings.ollama_extraction_model.trim().is_empty() {
-            settings.ollama_model.trim()
+        let model = model.to_owned();
+        let external = client.is_external();
+        if external {
+            let estimate = self.estimate_ai_fields(article_id, client.provider(), &model)?;
+            self.check_consent(
+                &estimate,
+                consent.ok_or_else(|| {
+                    AppError::Ai("Falta la confirmación del envío externo".into())
+                })?,
+            )?;
+        }
+        let max_cost = consent.and_then(|consent| consent.max_cost_usd);
+        let price = if external {
+            pricing(&self.open()?, client.provider(), &model)?
         } else {
-            settings.ollama_extraction_model.trim()
-        }
-        .to_owned();
-        if model.is_empty() {
-            return Err(AppError::Ai("Elige un modelo de Ollama para extracción en Configuración → Inteligencia artificial".into()));
-        }
-        let client = OllamaClient::from_settings(
-            settings,
-            Duration::from_secs(settings.ai_timeout_seconds as u64),
-        )?;
-        client.version()?;
+            None
+        };
+        let mut spent = 0.0;
         let connection = self.open()?;
         let (document_file_id, sha256, chunk_count): (String, String, i64) = connection
             .query_row(
@@ -365,8 +419,8 @@ impl Database {
             connection.execute(
                 "INSERT INTO extraction_runs (id, article_id, provider, model, prompt_version, source_document_hash, status,
                                               started_at, job_id, document_file_id, engine, options_json)
-                 VALUES (?1, ?2, 'ollama', ?3, ?4, ?5, 'running', ?6, ?7, ?8, 'ollama', ?9)",
-                params![run_id, article_id, model, AI_FIELDS_PROMPT_VERSION, sha256, timestamp, job_id, document_file_id, json!({ "fields": fields.len() }).to_string()],
+                 VALUES (?1, ?2, ?10, ?3, ?4, ?5, 'running', ?6, ?7, ?8, ?10, ?9)",
+                params![run_id, article_id, model, AI_FIELDS_PROMPT_VERSION, sha256, timestamp, job_id, document_file_id, json!({ "fields": fields.len() }).to_string(), client.provider()],
             )?;
             let keys: Vec<&str> = fields.iter().map(|field| field.key).collect();
             connection.execute(
@@ -428,15 +482,42 @@ impl Database {
                 let outcome = if chunks.is_empty() {
                     FieldOutcome::NotFound
                 } else {
-                    ask_field(
-                        &client,
+                    let mut usage = Usage::default();
+                    let asked = ask_field(
+                        client,
                         &model,
                         &label,
                         field.definition,
                         &data_type,
                         &chunks,
+                        &mut usage,
                         cancelled,
-                    )?
+                    );
+                    let cost = cost_usd(price, usage.prompt_tokens, usage.completion_tokens);
+                    spent += cost.unwrap_or(0.0);
+                    self.open()?.execute(
+                        "INSERT INTO ai_runs (id, article_id, provider, model, operation, prompt_sha256, input_sha256, output_json,
+                                              external_processing_authorized, created_at, status, prompt_version, duration_ms,
+                                              prompt_tokens, completion_tokens, attempts, error_message, cost_usd)
+                         VALUES (?1, ?2, ?3, ?4, 'ai_field', ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)",
+                        params![
+                            Uuid::new_v4().to_string(), article_id, client.provider(), model,
+                            crate::rag::sha256_hex(format!("{SYSTEM_PROMPT}{}", documents_block(&chunks)).as_bytes()),
+                            crate::rag::sha256_hex(field.key.as_bytes()),
+                            json!({ "field": field.key, "outcome": match &asked { Ok(FieldOutcome::Found { .. }) => "found", Ok(FieldOutcome::NotFound) => "not_found", Ok(FieldOutcome::Discarded(_)) => "discarded", Err(_) => "error" } }).to_string(),
+                            external, now(),
+                            match &asked { Ok(_) => "completed", Err(AppError::Cancelled) => "cancelled", Err(_) => "failed" },
+                            AI_FIELDS_PROMPT_VERSION, usage.duration_ms, usage.prompt_tokens, usage.completion_tokens, usage.calls,
+                            asked.as_ref().err().map(ToString::to_string), cost,
+                        ],
+                    )?;
+                    let outcome = asked?;
+                    if let Some(limit) = max_cost.filter(|limit| spent > *limit) {
+                        return Err(AppError::Ai(format!(
+                            "Se alcanzó el coste máximo confirmado ({limit:.4} USD); las propuestas ya generadas se conservan."
+                        )));
+                    }
+                    outcome
                 };
                 let mut connection = self.open()?;
                 let transaction = connection.transaction()?;
@@ -453,12 +534,12 @@ impl Database {
                                 id, article_id, field_key, value_json, display_value, value_type, raw_quote, section, page, bbox_json,
                                 document_file_id, source_document_hash, extraction_run_id, provider, model, prompt_version, method,
                                 origin, status, notes, revision_number, created_at, updated_at
-                             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, 'ollama', ?14, ?15, 'ai:field-question',
-                                       'ai', 'proposed', 'Propuesta de un modelo local; contrasta la cita antes de confirmar.', 1, ?16, ?16)",
+                             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?17, ?14, ?15, 'ai:field-question',
+                                       'ai', 'proposed', 'Propuesta de un modelo de IA; contrasta la cita antes de confirmar.', 1, ?16, ?16)",
                             params![
                                 value_id, article_id, field.key, value_json, display, data_type, citation.quote, citation.section, citation.page,
                                 citation.bbox.as_ref().map(|bbox| json!(bbox).to_string()), document_file_id, sha256, run_id, model,
-                                AI_FIELDS_PROMPT_VERSION, timestamp,
+                                AI_FIELDS_PROMPT_VERSION, timestamp, client.provider(),
                             ],
                         )?;
                         insert_revision(
@@ -470,7 +551,7 @@ impl Database {
                             "proposed",
                             "",
                             "ai",
-                            &format!("ollama {model}"),
+                            &format!("{} {model}", client.provider()),
                             "Propuesta inicial del modelo local",
                         )?;
                         let evidence_id = Uuid::new_v4().to_string();
@@ -496,9 +577,9 @@ impl Database {
                             "INSERT INTO master_record_values (
                                 id, article_id, field_key, value_json, display_value, value_type, document_file_id, source_document_hash,
                                 extraction_run_id, provider, model, prompt_version, method, origin, status, notes, created_at, updated_at
-                             ) VALUES (?1, ?2, ?3, 'null', '', ?4, ?5, ?6, ?7, 'ollama', ?8, ?9, 'ai:field-question', 'ai', 'not_found',
+                             ) VALUES (?1, ?2, ?3, 'null', '', ?4, ?5, ?6, ?7, ?11, ?8, ?9, 'ai:field-question', 'ai', 'not_found',
                                        'El modelo no encontró este dato en los fragmentos consultados. No implica que el artículo no lo reporte.', ?10, ?10)",
-                            params![value_id, article_id, field.key, data_type, document_file_id, sha256, run_id, model, AI_FIELDS_PROMPT_VERSION, timestamp],
+                            params![value_id, article_id, field.key, data_type, document_file_id, sha256, run_id, model, AI_FIELDS_PROMPT_VERSION, timestamp, client.provider()],
                         )?;
                         insert_revision(
                             &transaction,
@@ -509,7 +590,7 @@ impl Database {
                             "not_found",
                             "",
                             "ai",
-                            &format!("ollama {model}"),
+                            &format!("{} {model}", client.provider()),
                             "Búsqueda sin resultados",
                         )?;
                         not_found += 1;
@@ -540,19 +621,29 @@ impl Database {
         self.open()?.execute(
             "INSERT INTO audit_events (id, entity_type, entity_id, action, actor_type, actor_name, after_json, created_at)
              VALUES (?1, 'article', ?2, 'ai_field_proposals', 'ai', ?3, ?4, ?5)",
-            params![Uuid::new_v4().to_string(), article_id, format!("ollama {model}"), json!({ "runId": run_id, "found": found, "notFound": not_found, "discarded": discarded.len(), "status": status }).to_string(), now()],
+            params![Uuid::new_v4().to_string(), article_id, format!("{} {model}", client.provider()), json!({ "runId": run_id, "found": found, "notFound": not_found, "discarded": discarded.len(), "status": status }).to_string(), now()],
         )?;
         result.map(|()| summary)
     }
 }
 
+#[derive(Default)]
+struct Usage {
+    prompt_tokens: i64,
+    completion_tokens: i64,
+    duration_ms: i64,
+    calls: i64,
+}
+
+#[allow(clippy::too_many_arguments)]
 fn ask_field(
-    client: &OllamaClient,
+    client: &dyn ChatProvider,
     model: &str,
     label: &str,
     definition: &str,
     data_type: &str,
     chunks: &[RetrievedChunk],
+    usage: &mut Usage,
     cancelled: &dyn Fn() -> bool,
 ) -> AppResult<FieldOutcome> {
     let documents = documents_block(chunks);
@@ -577,6 +668,10 @@ fn ask_field(
             },
             cancelled,
         )?;
+        usage.calls += 1;
+        usage.prompt_tokens += response.prompt_tokens.unwrap_or(0);
+        usage.completion_tokens += response.completion_tokens.unwrap_or(0);
+        usage.duration_ms += response.duration_ms;
         let raw: RawField = match serde_json::from_str(response.content.trim()) {
             Ok(raw) => raw,
             Err(error) => {

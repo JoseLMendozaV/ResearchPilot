@@ -43,6 +43,11 @@ const MIGRATIONS: &[(i64, &str, &str)] = &[
         "local RAG index, assistant and AI runs",
         include_str!("../migrations/0006_local_rag.sql"),
     ),
+    (
+        7,
+        "optional external AI gateway",
+        include_str!("../migrations/0007_ai_gateway.sql"),
+    ),
 ];
 const REVIEW_TYPES: [&str; 3] = ["systematic_review", "systematic_mapping", "scoping_review"];
 
@@ -128,7 +133,8 @@ impl Database {
                         auto_extract_on_import, ocr_enabled, ocr_languages, grobid_enabled,
                         grobid_url, extraction_timeout_seconds, extractor_python_path,
                         ollama_embedding_model, ollama_extraction_model, auto_index_after_extraction,
-                        rag_mode, rag_top_k, rag_context_tokens, ai_timeout_seconds
+                        rag_mode, rag_top_k, rag_context_tokens, ai_timeout_seconds,
+                        openai_model, anthropic_model, external_monthly_budget_usd, external_max_output_tokens
                  FROM app_settings WHERE id = 1",
                 [],
                 |row| {
@@ -155,6 +161,10 @@ impl Database {
                         rag_top_k: row.get(19)?,
                         rag_context_tokens: row.get(20)?,
                         ai_timeout_seconds: row.get(21)?,
+                        openai_model: row.get(22)?,
+                        anthropic_model: row.get(23)?,
+                        external_monthly_budget_usd: row.get(24)?,
+                        external_max_output_tokens: row.get(25)?,
                     })
                 },
             )
@@ -173,7 +183,9 @@ impl Database {
                  grobid_enabled = ?13, grobid_url = ?14, extraction_timeout_seconds = ?15,
                  extractor_python_path = ?16, ollama_embedding_model = ?17,
                  ollama_extraction_model = ?18, auto_index_after_extraction = ?19, rag_mode = ?20,
-                 rag_top_k = ?21, rag_context_tokens = ?22, ai_timeout_seconds = ?23
+                 rag_top_k = ?21, rag_context_tokens = ?22, ai_timeout_seconds = ?23,
+                 openai_model = ?24, anthropic_model = ?25, external_monthly_budget_usd = ?26,
+                 external_max_output_tokens = ?27
              WHERE id = 1",
             params![
                 settings.researcher_name.trim(),
@@ -199,6 +211,10 @@ impl Database {
                 settings.rag_top_k,
                 settings.rag_context_tokens,
                 settings.ai_timeout_seconds,
+                settings.openai_model.trim(),
+                settings.anthropic_model.trim(),
+                settings.external_monthly_budget_usd,
+                settings.external_max_output_tokens,
             ],
         )?;
         self.settings()
@@ -350,6 +366,18 @@ fn validate_settings(settings: &AppSettings) -> AppResult<()> {
     {
         return Err(AppError::Validation(
             "Usa entre 1 y 30 fragmentos y un presupuesto de 1000 a 64000 tokens".into(),
+        ));
+    }
+    if !settings.external_monthly_budget_usd.is_finite()
+        || settings.external_monthly_budget_usd < 0.0
+    {
+        return Err(AppError::Validation(
+            "El presupuesto mensual no puede ser negativo".into(),
+        ));
+    }
+    if !(256..=64000).contains(&settings.external_max_output_tokens) {
+        return Err(AppError::Validation(
+            "El límite de tokens de salida debe estar entre 256 y 64000".into(),
         ));
     }
     if !(10..=3600).contains(&settings.ai_timeout_seconds) {

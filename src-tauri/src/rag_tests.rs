@@ -14,7 +14,14 @@ use serde_json::{Value, json};
 use tempfile::{TempDir, tempdir};
 
 use super::*;
-use crate::{jobs::JobRunner, library::tests::create_pdf, ollama, worker::WorkerEnvironment};
+use crate::{
+    ai_gateway::{self, Endpoints, ExternalConsent},
+    jobs::JobRunner,
+    library::tests::create_pdf,
+    ollama::{self, OllamaClient},
+    secrets::{MemoryStore, SecretStore},
+    worker::WorkerEnvironment,
+};
 
 type Responder = Arc<dyn Fn(&Value) -> String + Send + Sync>;
 
@@ -293,6 +300,8 @@ impl Fixture {
             year_to: None,
             question: question.into(),
             model: None,
+            provider: None,
+            consent: None,
         };
         let embed = |text: &str| {
             client
@@ -301,7 +310,14 @@ impl Fixture {
                 .pop()
         };
         self.database
-            .ask_assistant(&input, &embed, &self.client(), &|| false)
+            .ask_assistant(
+                &input,
+                &embed,
+                &self.client(),
+                "fake-chat:latest",
+                None,
+                &|| false,
+            )
             .expect("ask")
     }
 }
@@ -567,10 +583,19 @@ fn malformed_json_is_retried_and_cancellation_is_recorded() {
         year_to: None,
         question: "What learning rate?".into(),
         model: None,
+        provider: None,
+        consent: None,
     };
     let cancelled = fixture
         .database
-        .ask_assistant(&input, &|_| None, &fixture.client(), &|| true)
+        .ask_assistant(
+            &input,
+            &|_| None,
+            &fixture.client(),
+            "fake-chat:latest",
+            None,
+            &|| true,
+        )
         .unwrap();
     assert_eq!(
         cancelled.messages.len(),
@@ -619,7 +644,7 @@ fn ai_field_proposals_require_verified_quotes() {
     let settings = fixture.database.settings().unwrap();
     let job = fixture
         .database
-        .enqueue_ai_fields(&fixture.article_id)
+        .enqueue_ai_fields(&fixture.article_id, "ollama", "fake-chat:latest", None)
         .unwrap();
     let summary = fixture
         .database
@@ -628,6 +653,9 @@ fn ai_field_proposals_require_verified_quotes() {
             &fixture.article_id,
             &settings,
             &|_| None,
+            &fixture.client(),
+            "fake-chat:latest",
+            None,
             &|_, _| Ok(()),
             &|| false,
         )
@@ -683,6 +711,9 @@ fn ai_field_proposals_require_verified_quotes() {
             &fixture.article_id,
             &settings,
             &|_| None,
+            &fixture.client(),
+            "fake-chat:latest",
+            None,
             &|_, _| Ok(()),
             &|| false,
         )
@@ -745,4 +776,515 @@ fn remote_ollama_requires_explicit_authorization() {
         fixture.database.update_settings(settings),
         Err(AppError::Validation(_))
     ));
+}
+
+// --- Phase 5: external providers through the gateway ------------------------------
+
+type RecordedRequest = (String, Vec<(String, String)>, Value);
+type ExternalHandler = Arc<dyn Fn(&str, &[(String, String)], &Value) -> (u16, Value) + Send + Sync>;
+
+struct FakeExternal {
+    url: String,
+    handler: Arc<Mutex<ExternalHandler>>,
+    requests: Arc<Mutex<Vec<RecordedRequest>>>,
+}
+
+impl FakeExternal {
+    fn start() -> Self {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
+        let url = format!("http://{}", listener.local_addr().unwrap());
+        let handler: Arc<Mutex<ExternalHandler>> =
+            Arc::new(Mutex::new(Arc::new(|_, _, _| (500, json!({})))));
+        let requests = Arc::new(Mutex::new(Vec::new()));
+        let (shared_handler, shared_requests) = (handler.clone(), requests.clone());
+        thread::spawn(move || {
+            for stream in listener.incoming() {
+                let Ok(mut stream) = stream else { continue };
+                let mut reader = BufReader::new(stream.try_clone().unwrap());
+                let mut line = String::new();
+                if reader.read_line(&mut line).is_err() {
+                    continue;
+                }
+                let path = line.split_whitespace().nth(1).unwrap_or("").to_owned();
+                let mut headers = Vec::new();
+                let mut length = 0;
+                loop {
+                    let mut header = String::new();
+                    reader.read_line(&mut header).unwrap();
+                    let header = header.trim_end().to_owned();
+                    if header.is_empty() {
+                        break;
+                    }
+                    if let Some((name, value)) = header.split_once(':') {
+                        if name.eq_ignore_ascii_case("content-length") {
+                            length = value.trim().parse().unwrap_or(0);
+                        }
+                        headers.push((name.to_lowercase(), value.trim().to_owned()));
+                    }
+                }
+                let mut body = vec![0; length];
+                reader.read_exact(&mut body).unwrap();
+                let body: Value = serde_json::from_slice(&body).unwrap_or(Value::Null);
+                shared_requests
+                    .lock()
+                    .unwrap()
+                    .push((path.clone(), headers.clone(), body.clone()));
+                let handler = shared_handler.lock().unwrap().clone();
+                let (status, response) = handler(&path, &headers, &body);
+                let text = response.to_string();
+                let _ = write!(
+                    stream,
+                    "HTTP/1.1 {status} X\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{text}",
+                    text.len()
+                );
+            }
+        });
+        Self {
+            url,
+            handler,
+            requests,
+        }
+    }
+
+    fn respond_with(
+        &self,
+        handler: impl Fn(&str, &[(String, String)], &Value) -> (u16, Value) + Send + Sync + 'static,
+    ) {
+        *self.handler.lock().unwrap() = Arc::new(handler);
+    }
+}
+
+fn header<'a>(headers: &'a [(String, String)], name: &str) -> Option<&'a str> {
+    headers
+        .iter()
+        .find(|(key, _)| key == name)
+        .map(|(_, value)| value.as_str())
+}
+
+fn allow_external(fixture: &Fixture, budget: f64) {
+    let mut settings = fixture.database.settings().unwrap();
+    settings.local_only = false;
+    settings.allow_external_processing = true;
+    settings.anthropic_model = "claude-opus-5-5".into();
+    settings.openai_model = "gpt-test".into();
+    settings.external_monthly_budget_usd = budget;
+    settings.external_max_output_tokens = 1000;
+    fixture.database.update_settings(settings).unwrap();
+}
+
+fn external_input(provider: &str) -> AskInput {
+    AskInput {
+        request_id: "r".into(),
+        conversation_id: None,
+        scope_type: "library".into(),
+        scope_id: None,
+        year_from: None,
+        year_to: None,
+        question: "What accuracy did the model reach on the test set?".into(),
+        model: None,
+        provider: Some(provider.into()),
+        consent: None,
+    }
+}
+
+fn anthropic_answer(request: &Value) -> Value {
+    let user = request["messages"][0]["content"].as_str().unwrap();
+    let position = user.find("accuracy of 93.2%").expect("context sent");
+    let start = user[..position].rfind("<fragmento id=\"").unwrap() + "<fragmento id=\"".len();
+    let source = user[start..].split('"').next().unwrap();
+    json!({
+        "content": [
+            { "type": "thinking", "thinking": "" },
+            { "type": "text", "text": json!({ "found": true, "answer": format!("93.2% [{source}]"), "citations": [{ "source": source, "quote": "The model reached an accuracy of 93.2%" }] }).to_string() }
+        ],
+        "stop_reason": "end_turn",
+        "usage": { "input_tokens": 1000, "output_tokens": 100 }
+    })
+}
+
+#[test]
+fn external_providers_are_blocked_without_policy_consent_and_key() {
+    let fixture = fixture();
+    let secrets = MemoryStore::default();
+    let endpoints = Endpoints::default();
+    let consent = ExternalConsent {
+        provider: "anthropic".into(),
+        model: "claude-opus-5-5".into(),
+        max_cost_usd: Some(1.0),
+    };
+    let settings = fixture.database.settings().unwrap();
+    let error = ai_gateway::chat_provider(
+        &settings,
+        "anthropic",
+        "claude-opus-5-5",
+        Some(&consent),
+        &secrets,
+        &endpoints,
+    )
+    .err()
+    .unwrap();
+    assert!(error.to_string().contains("solo local"), "{error}");
+    assert!(
+        ai_gateway::test_connection(&settings, "anthropic", &secrets, &endpoints).is_err(),
+        "no network at all in local-only mode"
+    );
+
+    allow_external(&fixture, 0.0);
+    let settings = fixture.database.settings().unwrap();
+    assert!(
+        ai_gateway::chat_provider(
+            &settings,
+            "anthropic",
+            "claude-opus-5-5",
+            None,
+            &secrets,
+            &endpoints
+        )
+        .err()
+        .unwrap()
+        .to_string()
+        .contains("confirmación")
+    );
+    let other = ExternalConsent {
+        model: "claude-haiku-5-5".into(),
+        ..consent.clone()
+    };
+    assert!(
+        ai_gateway::chat_provider(
+            &settings,
+            "anthropic",
+            "claude-opus-5-5",
+            Some(&other),
+            &secrets,
+            &endpoints
+        )
+        .is_err(),
+        "consent is bound to the model"
+    );
+    assert!(
+        ai_gateway::chat_provider(
+            &settings,
+            "anthropic",
+            "claude-opus-5-5",
+            Some(&consent),
+            &secrets,
+            &endpoints
+        )
+        .err()
+        .unwrap()
+        .to_string()
+        .contains("Llavero")
+    );
+    secrets
+        .set("anthropic-api-key", "sk-ant-test-0123456789abcdef")
+        .unwrap();
+    assert!(
+        ai_gateway::chat_provider(
+            &settings,
+            "anthropic",
+            "claude-opus-5-5",
+            Some(&consent),
+            &secrets,
+            &endpoints
+        )
+        .is_ok()
+    );
+    let status = ai_gateway::provider_status(&secrets, "anthropic").unwrap();
+    assert_eq!(
+        (status.has_key, status.key_hint.as_deref()),
+        (true, Some("…cdef")),
+        "only a hint, never the key"
+    );
+}
+
+#[test]
+fn anthropic_answers_use_structured_output_record_cost_and_skip_confidential_articles() {
+    let fixture = fixture();
+    fixture.index_all();
+    allow_external(&fixture, 0.0);
+    let api = FakeExternal::start();
+    api.respond_with(|path, _, body| {
+        if path == "/v1/messages" {
+            (200, anthropic_answer(body))
+        } else {
+            (404, json!({}))
+        }
+    });
+    let secrets = MemoryStore::default();
+    secrets
+        .set("anthropic-api-key", "sk-ant-test-0123456789abcdef")
+        .unwrap();
+    let endpoints = Endpoints {
+        openai: api.url.clone(),
+        anthropic: api.url.clone(),
+    };
+    let settings = fixture.database.settings().unwrap();
+    let embed = |_: &str| None;
+
+    let mut input = external_input("anthropic");
+    let estimate = fixture
+        .database
+        .estimate_assistant(&input, "anthropic", "claude-opus-5-5", &embed)
+        .unwrap();
+    assert!(estimate.pricing_known);
+    assert!(estimate.worst_case_cost_usd.unwrap() > estimate.expected_cost_usd.unwrap());
+    assert!(
+        api.requests.lock().unwrap().is_empty(),
+        "estimating sends nothing"
+    );
+
+    // Marking the article confidential removes it from external context entirely.
+    fixture
+        .database
+        .set_article_confidential(&fixture.article_id, true)
+        .unwrap();
+    let confidential = fixture
+        .database
+        .estimate_assistant(&input, "anthropic", "claude-opus-5-5", &embed)
+        .unwrap();
+    assert!(confidential.excluded_confidential > 0);
+    assert!(
+        confidential
+            .articles
+            .iter()
+            .all(|article| article.id != fixture.article_id)
+    );
+    assert!(
+        fixture
+            .database
+            .estimate_ai_fields(&fixture.article_id, "anthropic", "claude-opus-5-5")
+            .is_err()
+    );
+    fixture
+        .database
+        .set_article_confidential(&fixture.article_id, false)
+        .unwrap();
+
+    let consent = ExternalConsent {
+        provider: "anthropic".into(),
+        model: "claude-opus-5-5".into(),
+        max_cost_usd: estimate.worst_case_cost_usd,
+    };
+    input.consent = Some(consent.clone());
+    let client = ai_gateway::chat_provider(
+        &settings,
+        "anthropic",
+        "claude-opus-5-5",
+        Some(&consent),
+        &secrets,
+        &endpoints,
+    )
+    .unwrap();
+    let detail = fixture
+        .database
+        .ask_assistant(
+            &input,
+            &embed,
+            client.as_ref(),
+            "claude-opus-5-5",
+            Some(&consent),
+            &|| false,
+        )
+        .unwrap();
+    let answer = detail.messages.last().unwrap();
+    assert_eq!(answer.status, "answered", "{}", answer.content);
+    assert_eq!(answer.citations[0].page, 2);
+
+    let (path, headers, body) = api.requests.lock().unwrap().last().unwrap().clone();
+    assert_eq!(path, "/v1/messages");
+    assert_eq!(
+        header(&headers, "x-api-key"),
+        Some("sk-ant-test-0123456789abcdef")
+    );
+    assert_eq!(header(&headers, "anthropic-version"), Some("2026-10-21"));
+    assert_eq!(
+        header(&headers, "anthropic-beta"),
+        Some("server-side-fallback-2026-07-01")
+    );
+    assert_eq!(body["fallbacks"], json!("default"));
+    assert_eq!(
+        body["output_config"]["format"]["type"],
+        json!("json_schema")
+    );
+    assert!(
+        body.get("temperature").is_none(),
+        "sampling parameters are rejected by the API version"
+    );
+    assert_eq!(body["system"].as_str().unwrap(), ANSWER_SYSTEM_PROMPT);
+
+    let log = fixture.database.external_log(10).unwrap();
+    assert_eq!(log.total_requests, 1);
+    let cost = log.entries[0].cost_usd.unwrap();
+    assert!(
+        (cost - (4.0 * 1000.0 + 20.0 * 100.0) / 1_000_000.0).abs() < 1e-9,
+        "cost from usage and reference price"
+    );
+    assert!((log.month_spent_usd - cost).abs() < 1e-9);
+}
+
+#[test]
+fn consent_and_budget_are_rechecked_before_sending() {
+    let fixture = fixture();
+    fixture.index_all();
+    allow_external(&fixture, 0.0001);
+    let embed = |_: &str| None;
+    let input = external_input("anthropic");
+    let estimate = fixture
+        .database
+        .estimate_assistant(&input, "anthropic", "claude-opus-5-5", &embed)
+        .unwrap();
+    assert!(!estimate.within_budget);
+    let consent = ExternalConsent {
+        provider: "anthropic".into(),
+        model: "claude-opus-5-5".into(),
+        max_cost_usd: estimate.worst_case_cost_usd,
+    };
+    assert!(
+        fixture
+            .database
+            .check_consent(&estimate, &consent)
+            .unwrap_err()
+            .to_string()
+            .contains("presupuesto")
+    );
+
+    allow_external(&fixture, 0.0);
+    let estimate = fixture
+        .database
+        .estimate_assistant(&input, "anthropic", "claude-opus-5-5", &embed)
+        .unwrap();
+    let cheap = ExternalConsent {
+        max_cost_usd: Some(estimate.worst_case_cost_usd.unwrap() / 10.0),
+        ..consent.clone()
+    };
+    assert!(
+        fixture
+            .database
+            .check_consent(&estimate, &cheap)
+            .unwrap_err()
+            .to_string()
+            .contains("supera")
+    );
+    assert!(fixture.database.check_consent(&estimate, &consent).is_ok());
+
+    let unknown = fixture
+        .database
+        .estimate_assistant(&input, "openai", "gpt-test", &embed)
+        .unwrap();
+    assert!(!unknown.pricing_known && unknown.worst_case_cost_usd.is_none());
+    fixture
+        .database
+        .set_model_pricing("openai", "gpt-test", 1.0, 2.0)
+        .unwrap();
+    assert!(
+        fixture
+            .database
+            .estimate_assistant(&input, "openai", "gpt-test", &embed)
+            .unwrap()
+            .pricing_known
+    );
+}
+
+#[test]
+fn provider_errors_are_explained_and_openai_uses_strict_json_schema() {
+    let fixture = fixture();
+    allow_external(&fixture, 0.0);
+    let api = FakeExternal::start();
+    let secrets = MemoryStore::default();
+    secrets
+        .set("openai-api-key", "sk-openai-test-0123456789")
+        .unwrap();
+    secrets
+        .set("anthropic-api-key", "sk-ant-test-0123456789abcdef")
+        .unwrap();
+    let endpoints = Endpoints {
+        openai: api.url.clone(),
+        anthropic: api.url.clone(),
+    };
+    let settings = fixture.database.settings().unwrap();
+    let request = |model: &'static str| crate::ollama::ChatRequest {
+        model,
+        system: "s",
+        user: "u",
+        format: Some(Box::leak(Box::new(answer_schema()))),
+        temperature: 0.1,
+        num_ctx: 4096,
+    };
+
+    api.respond_with(|_, _, _| (402, json!({ "type": "error", "error": { "type": "billing_error", "message": "credit balance too low" } })));
+    let anthropic = ai_gateway::AnthropicClient::new(
+        &endpoints.anthropic,
+        "k".into(),
+        100,
+        Duration::from_secs(5),
+    );
+    let error = ai_gateway::ChatProvider::chat(&anthropic, &request("claude-haiku-5-5"), &|| false)
+        .unwrap_err();
+    assert!(
+        error.to_string().contains("independiente") || error.to_string().contains("aparte"),
+        "{error}"
+    );
+
+    api.respond_with(|_, _, _| (200, json!({ "content": [], "stop_reason": "refusal", "stop_details": { "category": "cyber" }, "usage": {} })));
+    assert!(
+        ai_gateway::ChatProvider::chat(&anthropic, &request("claude-haiku-5-5"), &|| false)
+            .unwrap_err()
+            .to_string()
+            .contains("cyber")
+    );
+    let haiku_request = api.requests.lock().unwrap().last().unwrap().clone();
+    assert!(
+        header(&haiku_request.1, "anthropic-beta").is_none(),
+        "fallbacks only for models that support them"
+    );
+
+    api.respond_with(|_, _, _| {
+        (
+            429,
+            json!({ "error": { "message": "quota", "code": "insufficient_quota" } }),
+        )
+    });
+    let consent = ExternalConsent {
+        provider: "openai".into(),
+        model: "gpt-test".into(),
+        max_cost_usd: None,
+    };
+    let openai = ai_gateway::chat_provider(
+        &settings,
+        "openai",
+        "gpt-test",
+        Some(&consent),
+        &secrets,
+        &endpoints,
+    )
+    .unwrap();
+    assert!(
+        openai
+            .chat(&request("gpt-test"), &|| false)
+            .unwrap_err()
+            .to_string()
+            .contains("ChatGPT Plus")
+    );
+    let (_, headers, body) = api.requests.lock().unwrap().last().unwrap().clone();
+    assert_eq!(
+        header(&headers, "authorization"),
+        Some("Bearer sk-openai-test-0123456789")
+    );
+    assert_eq!(
+        body["response_format"]["json_schema"]["strict"],
+        json!(true)
+    );
+    assert_eq!(
+        body["response_format"]["json_schema"]["schema"]["additionalProperties"],
+        json!(false)
+    );
+
+    api.respond_with(|path, _, _| {
+        assert_eq!(path, "/v1/models");
+        (200, json!({ "data": [{ "id": "gpt-test" }, { "id": "text-embedding-3-small" }, { "id": "whisper-1" }, { "id": "o4-mini" }] }))
+    });
+    assert_eq!(
+        ai_gateway::test_connection(&settings, "openai", &secrets, &endpoints).unwrap(),
+        vec!["gpt-test", "o4-mini"]
+    );
 }

@@ -1,4 +1,5 @@
 mod ai_fields;
+mod ai_gateway;
 mod bibliography;
 mod db;
 mod error;
@@ -9,6 +10,7 @@ mod library;
 mod models;
 mod ollama;
 mod rag;
+mod secrets;
 mod worker;
 
 use std::{
@@ -21,6 +23,9 @@ use std::{
     time::Duration,
 };
 
+use ai_gateway::{
+    Endpoints, ExternalConsent, ExternalEstimate, ExternalLog, ModelPrice, ProviderStatus,
+};
 use db::Database;
 use error::{AppError, AppResult};
 use indexing::IndexStatus;
@@ -33,6 +38,7 @@ use models::{
 };
 use ollama::{OllamaClient, OllamaStatus};
 use rag::{AskInput, ConversationDetail, ConversationSummary, SearchOutcome};
+use secrets::{KeychainStore, SecretStore};
 use tauri::{Emitter, Manager, RunEvent, State};
 use worker::WorkerEnvironment;
 
@@ -289,10 +295,141 @@ fn enqueue_ai_fields(
     database: State<'_, Database>,
     runner: State<'_, JobRunner>,
     article_id: String,
+    provider: Option<String>,
+    model: Option<String>,
+    consent: Option<ExternalConsent>,
 ) -> AppResult<JobSummary> {
-    let job = database.enqueue_ai_fields(&article_id)?;
+    let settings = database.settings()?;
+    let provider = provider.unwrap_or_else(|| "ollama".into());
+    let model = ai_gateway::resolve_model(&settings, &provider, model.as_deref(), "fields")?;
+    if provider != "ollama" {
+        ai_gateway::ensure_external_allowed(&settings)?;
+        let estimate = database.estimate_ai_fields(&article_id, &provider, &model)?;
+        database.check_consent(
+            &estimate,
+            consent
+                .as_ref()
+                .ok_or_else(|| AppError::Ai("Falta la confirmación del envío externo".into()))?,
+        )?;
+    }
+    let job = database.enqueue_ai_fields(&article_id, &provider, &model, consent.as_ref())?;
     runner.wake();
     Ok(job)
+}
+
+#[tauri::command]
+fn estimate_ai_fields(
+    database: State<'_, Database>,
+    article_id: String,
+    provider: String,
+    model: Option<String>,
+) -> AppResult<ExternalEstimate> {
+    let settings = database.settings()?;
+    ai_gateway::ensure_external_allowed(&settings)?;
+    let model = ai_gateway::resolve_model(&settings, &provider, model.as_deref(), "fields")?;
+    database.estimate_ai_fields(&article_id, &provider, &model)
+}
+
+#[tauri::command]
+async fn estimate_assistant(
+    database: State<'_, Database>,
+    input: AskInput,
+) -> AppResult<ExternalEstimate> {
+    let database = database.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let settings = database.settings()?;
+        ai_gateway::ensure_external_allowed(&settings)?;
+        let provider = input
+            .provider
+            .clone()
+            .unwrap_or_else(|| settings.ai_provider.clone());
+        let model =
+            ai_gateway::resolve_model(&settings, &provider, input.model.as_deref(), "assistant")?;
+        database.estimate_assistant(&input, &provider, &model, &|text| {
+            query_embedding(&settings, text)
+        })
+    })
+    .await
+    .map_err(|error| AppError::Ai(error.to_string()))?
+}
+
+/// Keychain access shared by commands (never exposes stored values).
+struct Secrets(Arc<dyn SecretStore>);
+
+#[tauri::command]
+fn provider_statuses(secrets: State<'_, Secrets>) -> AppResult<Vec<ProviderStatus>> {
+    ["openai", "anthropic"]
+        .iter()
+        .map(|provider| ai_gateway::provider_status(secrets.0.as_ref(), provider))
+        .collect()
+}
+
+#[tauri::command]
+fn set_api_key(
+    secrets: State<'_, Secrets>,
+    provider: String,
+    key: String,
+) -> AppResult<ProviderStatus> {
+    let key = key.trim();
+    if key.len() < 20 || key.len() > 400 || key.chars().any(char::is_whitespace) {
+        return Err(AppError::Validation(
+            "La clave de API no tiene un formato válido".into(),
+        ));
+    }
+    secrets.0.set(secrets::api_key_name(&provider)?, key)?;
+    ai_gateway::provider_status(secrets.0.as_ref(), &provider)
+}
+
+#[tauri::command]
+fn delete_api_key(secrets: State<'_, Secrets>, provider: String) -> AppResult<ProviderStatus> {
+    secrets.0.delete(secrets::api_key_name(&provider)?)?;
+    ai_gateway::provider_status(secrets.0.as_ref(), &provider)
+}
+
+#[tauri::command]
+async fn test_provider(
+    database: State<'_, Database>,
+    secrets: State<'_, Secrets>,
+    provider: String,
+) -> AppResult<Vec<String>> {
+    let settings = database.settings()?;
+    let store = secrets.0.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        ai_gateway::test_connection(&settings, &provider, store.as_ref(), &Endpoints::default())
+    })
+    .await
+    .map_err(|error| AppError::Ai(error.to_string()))?
+}
+
+#[tauri::command]
+fn list_model_pricing(database: State<'_, Database>) -> AppResult<Vec<ModelPrice>> {
+    database.model_pricing()
+}
+
+#[tauri::command]
+fn set_model_pricing(
+    database: State<'_, Database>,
+    provider: String,
+    model: String,
+    input_usd_per_mtok: f64,
+    output_usd_per_mtok: f64,
+) -> AppResult<Vec<ModelPrice>> {
+    database.set_model_pricing(&provider, &model, input_usd_per_mtok, output_usd_per_mtok)?;
+    database.model_pricing()
+}
+
+#[tauri::command]
+fn external_log(database: State<'_, Database>, limit: i64) -> AppResult<ExternalLog> {
+    database.external_log(limit)
+}
+
+#[tauri::command]
+fn set_article_confidential(
+    database: State<'_, Database>,
+    article_id: String,
+    confidential: bool,
+) -> AppResult<()> {
+    database.set_article_confidential(&article_id, confidential)
 }
 
 fn query_embedding(settings: &AppSettings, text: &str) -> Option<Vec<f32>> {
@@ -356,8 +493,10 @@ async fn search_chunks(
 async fn ask_assistant(
     database: State<'_, Database>,
     requests: State<'_, AssistantRequests>,
+    secrets: State<'_, Secrets>,
     input: AskInput,
 ) -> AppResult<ConversationDetail> {
+    let store = secrets.0.clone();
     let flag = Arc::new(AtomicBool::new(false));
     requests
         .0
@@ -368,14 +507,26 @@ async fn ask_assistant(
     let request_id = input.request_id.clone();
     let result = tauri::async_runtime::spawn_blocking(move || {
         let settings = database.settings()?;
-        let client = OllamaClient::from_settings(
+        let provider = input
+            .provider
+            .clone()
+            .unwrap_or_else(|| settings.ai_provider.clone());
+        let model =
+            ai_gateway::resolve_model(&settings, &provider, input.model.as_deref(), "assistant")?;
+        let client = ai_gateway::chat_provider(
             &settings,
-            Duration::from_secs(settings.ai_timeout_seconds as u64),
+            &provider,
+            &model,
+            input.consent.as_ref(),
+            store.as_ref(),
+            &Endpoints::default(),
         )?;
         database.ask_assistant(
             &input,
             &|text| query_embedding(&settings, text),
-            &client,
+            client.as_ref(),
+            &model,
+            input.consent.as_ref(),
             &|| flag.load(Ordering::SeqCst),
         )
     })
@@ -464,6 +615,7 @@ pub fn run() {
             app.manage(database);
             app.manage(runner);
             app.manage(AssistantRequests::default());
+            app.manage(Secrets(Arc::new(KeychainStore)));
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -502,7 +654,17 @@ pub fn run() {
             cancel_assistant,
             list_conversations,
             get_conversation,
-            delete_conversation
+            delete_conversation,
+            estimate_assistant,
+            estimate_ai_fields,
+            provider_statuses,
+            set_api_key,
+            delete_api_key,
+            test_provider,
+            list_model_pricing,
+            set_model_pricing,
+            external_log,
+            set_article_confidential
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

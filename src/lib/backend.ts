@@ -1,6 +1,12 @@
 import { invoke } from "@tauri-apps/api/core";
 import type {
   AddMasterValueInput,
+  AiProvider,
+  ExternalConsent,
+  ExternalEstimate,
+  ExternalLog,
+  ModelPrice,
+  ProviderStatus,
   AskInput,
   ConversationDetail,
   ConversationSummary,
@@ -69,7 +75,21 @@ export const backend = {
   pullOllamaModel: (model: string) => invoke<JobSummary>("pull_ollama_model", { model }),
   indexStatus: () => invoke<IndexStatus>("index_status"),
   enqueueIndexing: (articleIds?: string[]) => invoke<EnqueueResult[]>("enqueue_indexing", { articleIds }),
-  enqueueAiFields: (articleId: string) => invoke<JobSummary>("enqueue_ai_fields", { articleId }),
+  enqueueAiFields: (articleId: string, provider?: AiProvider, model?: string, consent?: ExternalConsent) =>
+    invoke<JobSummary>("enqueue_ai_fields", { articleId, provider, model, consent }),
+  estimateAiFields: (articleId: string, provider: AiProvider, model?: string) =>
+    invoke<ExternalEstimate>("estimate_ai_fields", { articleId, provider, model }),
+  estimateAssistant: (input: AskInput) => invoke<ExternalEstimate>("estimate_assistant", { input }),
+  providerStatuses: () => invoke<ProviderStatus[]>("provider_statuses"),
+  setApiKey: (provider: string, key: string) => invoke<ProviderStatus>("set_api_key", { provider, key }),
+  deleteApiKey: (provider: string) => invoke<ProviderStatus>("delete_api_key", { provider }),
+  testProvider: (provider: string) => invoke<string[]>("test_provider", { provider }),
+  listModelPricing: () => invoke<ModelPrice[]>("list_model_pricing"),
+  setModelPricing: (provider: string, model: string, inputUsdPerMtok: number, outputUsdPerMtok: number) =>
+    invoke<ModelPrice[]>("set_model_pricing", { provider, model, inputUsdPerMtok, outputUsdPerMtok }),
+  externalLog: (limit = 100) => invoke<ExternalLog>("external_log", { limit }),
+  setArticleConfidential: (articleId: string, confidential: boolean) =>
+    invoke<void>("set_article_confidential", { articleId, confidential }),
   searchChunks: (input: SearchInput) => invoke<SearchOutcome>("search_chunks", { input }),
   askAssistant: (input: AskInput) => invoke<ConversationDetail>("ask_assistant", { input }),
   cancelAssistant: (requestId: string) => invoke<void>("cancel_assistant", { requestId }),
