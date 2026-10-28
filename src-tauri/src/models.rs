@@ -18,6 +18,13 @@ pub struct AppSettings {
     pub grobid_url: String,
     pub extraction_timeout_seconds: i64,
     pub extractor_python_path: String,
+    pub ollama_embedding_model: String,
+    pub ollama_extraction_model: String,
+    pub auto_index_after_extraction: bool,
+    pub rag_mode: String,
+    pub rag_top_k: i64,
+    pub rag_context_tokens: i64,
+    pub ai_timeout_seconds: i64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

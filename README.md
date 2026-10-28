@@ -2,7 +2,7 @@
 
 ResearchPilot es una aplicación de escritorio local-first para administrar evidencia científica y construir revisiones sistemáticas, mapeos sistemáticos y revisiones de alcance con trazabilidad documental.
 
-ResearchPilot dispone de una aplicación Tauri 2 real para macOS Apple Silicon con React, TypeScript, Tailwind CSS, Rust y SQLite. Las Fases 1 y 2 incluyen navegación, revisiones, configuración, biblioteca local, importación PDF/RIS/BibTeX/CSV, búsqueda FTS5, colecciones, visor PDF.js y metadatos auditables. La Fase 3 añade extracción científica local en cola persistente: diseño por página con coordenadas, OCR y GROBID opcionales, y una ficha maestra cuyos valores son propuestas con cita literal, página y caja en el PDF, revisables y con historial.
+ResearchPilot dispone de una aplicación Tauri 2 real para macOS Apple Silicon con React, TypeScript, Tailwind CSS, Rust y SQLite. Las Fases 1 y 2 incluyen navegación, revisiones, configuración, biblioteca local, importación PDF/RIS/BibTeX/CSV, búsqueda FTS5, colecciones, visor PDF.js y metadatos auditables. La Fase 3 añade extracción científica local en cola persistente: diseño por página con coordenadas, OCR y GROBID opcionales, y una ficha maestra cuyos valores son propuestas con cita literal, página y caja en el PDF, revisables y con historial. La Fase 4 integra Ollama local: índice híbrido (FTS5 + vectorial), asistente que solo muestra respuestas con citas verificadas literalmente y propuestas de IA para los campos narrativos de la ficha.
 
 ## Arquitectura
 
@@ -21,6 +21,7 @@ La UI no ejecuta SQL directamente. Toda mutación persistente atraviesa comandos
 - Rust estable mediante `rustup`.
 - Python 3.9 o posterior para el extractor (recomendado Homebrew: `brew install python`).
 - Opcional: `brew install tesseract tesseract-lang` para OCR de páginas escaneadas.
+- Opcional: [Ollama](https://ollama.com) con un modelo de lenguaje y uno de embeddings para el asistente y las propuestas de IA. Sin Ollama, todo lo demás funciona.
 
 ## Ejecutar en desarrollo
 
@@ -70,3 +71,4 @@ Documentación de referencia:
 - [Cierre de Fase 1](docs/phase-1.md)
 - [Cierre de Fase 2](docs/phase-2.md)
 - [Cierre de Fase 3](docs/phase-3.md)
+- [Cierre de Fase 4](docs/phase-4.md)

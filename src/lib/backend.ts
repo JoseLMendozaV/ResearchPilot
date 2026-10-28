@@ -1,6 +1,13 @@
 import { invoke } from "@tauri-apps/api/core";
 import type {
   AddMasterValueInput,
+  AskInput,
+  ConversationDetail,
+  ConversationSummary,
+  IndexStatus,
+  OllamaStatus,
+  SearchInput,
+  SearchOutcome,
   AppSettings,
   ArticleExtraction,
   BootstrapData,
@@ -58,6 +65,17 @@ export const backend = {
   revertMasterValue: (valueId: string, revisionNumber: number) =>
     invoke<MasterValue>("revert_master_value", { valueId, revisionNumber }),
   recentEvidence: (limit = 200) => invoke<EvidenceListItem[]>("list_recent_evidence", { limit }),
+  ollamaStatus: () => invoke<OllamaStatus>("ollama_status"),
+  pullOllamaModel: (model: string) => invoke<JobSummary>("pull_ollama_model", { model }),
+  indexStatus: () => invoke<IndexStatus>("index_status"),
+  enqueueIndexing: (articleIds?: string[]) => invoke<EnqueueResult[]>("enqueue_indexing", { articleIds }),
+  enqueueAiFields: (articleId: string) => invoke<JobSummary>("enqueue_ai_fields", { articleId }),
+  searchChunks: (input: SearchInput) => invoke<SearchOutcome>("search_chunks", { input }),
+  askAssistant: (input: AskInput) => invoke<ConversationDetail>("ask_assistant", { input }),
+  cancelAssistant: (requestId: string) => invoke<void>("cancel_assistant", { requestId }),
+  listConversations: () => invoke<ConversationSummary[]>("list_conversations"),
+  getConversation: (conversationId: string) => invoke<ConversationDetail>("get_conversation", { conversationId }),
+  deleteConversation: (conversationId: string) => invoke<void>("delete_conversation", { conversationId }),
 };
 
 export function errorMessage(error: unknown): string {

@@ -38,6 +38,11 @@ const MIGRATIONS: &[(i64, &str, &str)] = &[
         "scientific extraction, master record and job queue",
         include_str!("../migrations/0005_scientific_extraction.sql"),
     ),
+    (
+        6,
+        "local RAG index, assistant and AI runs",
+        include_str!("../migrations/0006_local_rag.sql"),
+    ),
 ];
 const REVIEW_TYPES: [&str; 3] = ["systematic_review", "systematic_mapping", "scoping_review"];
 
@@ -121,7 +126,9 @@ impl Database {
                 "SELECT researcher_name, default_language, appearance, ai_provider,
                         local_only, allow_external_processing, ollama_base_url, ollama_model,
                         auto_extract_on_import, ocr_enabled, ocr_languages, grobid_enabled,
-                        grobid_url, extraction_timeout_seconds, extractor_python_path
+                        grobid_url, extraction_timeout_seconds, extractor_python_path,
+                        ollama_embedding_model, ollama_extraction_model, auto_index_after_extraction,
+                        rag_mode, rag_top_k, rag_context_tokens, ai_timeout_seconds
                  FROM app_settings WHERE id = 1",
                 [],
                 |row| {
@@ -141,6 +148,13 @@ impl Database {
                         grobid_url: row.get(12)?,
                         extraction_timeout_seconds: row.get(13)?,
                         extractor_python_path: row.get(14)?,
+                        ollama_embedding_model: row.get(15)?,
+                        ollama_extraction_model: row.get(16)?,
+                        auto_index_after_extraction: row.get(17)?,
+                        rag_mode: row.get(18)?,
+                        rag_top_k: row.get(19)?,
+                        rag_context_tokens: row.get(20)?,
+                        ai_timeout_seconds: row.get(21)?,
                     })
                 },
             )
@@ -157,7 +171,9 @@ impl Database {
                  ollama_base_url = ?7, ollama_model = ?8, updated_at = ?9,
                  auto_extract_on_import = ?10, ocr_enabled = ?11, ocr_languages = ?12,
                  grobid_enabled = ?13, grobid_url = ?14, extraction_timeout_seconds = ?15,
-                 extractor_python_path = ?16
+                 extractor_python_path = ?16, ollama_embedding_model = ?17,
+                 ollama_extraction_model = ?18, auto_index_after_extraction = ?19, rag_mode = ?20,
+                 rag_top_k = ?21, rag_context_tokens = ?22, ai_timeout_seconds = ?23
              WHERE id = 1",
             params![
                 settings.researcher_name.trim(),
@@ -176,6 +192,13 @@ impl Database {
                 settings.grobid_url.trim().trim_end_matches('/'),
                 settings.extraction_timeout_seconds,
                 settings.extractor_python_path.trim(),
+                settings.ollama_embedding_model.trim(),
+                settings.ollama_extraction_model.trim(),
+                settings.auto_index_after_extraction,
+                settings.rag_mode,
+                settings.rag_top_k,
+                settings.rag_context_tokens,
+                settings.ai_timeout_seconds,
             ],
         )?;
         self.settings()
@@ -308,6 +331,30 @@ fn validate_settings(settings: &AppSettings) -> AppResult<()> {
     if settings.local_only && settings.allow_external_processing {
         return Err(AppError::Validation(
             "El procesamiento externo debe estar desactivado en modo solo local".into(),
+        ));
+    }
+    if !crate::worker::is_loopback_url(&settings.ollama_base_url)
+        && !(settings.allow_external_processing && !settings.local_only)
+    {
+        return Err(AppError::Validation(
+            "Un Ollama fuera de este equipo requiere desactivar el modo solo local y autorizar el procesamiento externo".into(),
+        ));
+    }
+    if !["hybrid", "lexical", "semantic"].contains(&settings.rag_mode.as_str()) {
+        return Err(AppError::Validation(
+            "Modo de búsqueda no reconocido".into(),
+        ));
+    }
+    if !(1..=30).contains(&settings.rag_top_k)
+        || !(1000..=64000).contains(&settings.rag_context_tokens)
+    {
+        return Err(AppError::Validation(
+            "Usa entre 1 y 30 fragmentos y un presupuesto de 1000 a 64000 tokens".into(),
+        ));
+    }
+    if !(10..=3600).contains(&settings.ai_timeout_seconds) {
+        return Err(AppError::Validation(
+            "El tiempo máximo de IA debe estar entre 10 y 3600 segundos".into(),
         ));
     }
     let languages = settings.ocr_languages.trim();

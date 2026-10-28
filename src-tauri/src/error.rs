@@ -13,6 +13,10 @@ pub enum AppError {
     Initialization(String),
     #[error("Extractor: {0}")]
     Worker(String),
+    #[error("IA local: {0}")]
+    Ai(String),
+    #[error("Operación cancelada")]
+    Cancelled,
 }
 
 impl Serialize for AppError {

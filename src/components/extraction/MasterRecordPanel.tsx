@@ -1,8 +1,9 @@
 import { FormEvent, useMemo, useState } from "react";
-import { ChevronDown, LoaderCircle, Pause, Plus, RefreshCw, ScanSearch, Square, TriangleAlert } from "lucide-react";
+import { ChevronDown, LoaderCircle, MessageSquareText, Pause, Plus, RefreshCw, ScanSearch, Sparkles, Square, TriangleAlert } from "lucide-react";
+import { Link } from "react-router-dom";
 import { backend, errorMessage } from "../../lib/backend";
 import { formatDateTime, groupLabels, jobStatusLabels, statusLabels } from "../../lib/extraction";
-import type { AddMasterValueInput, ArticleExtraction, EvidenceItem, FieldGroup, MasterField, MasterValue } from "../../types";
+import type { AddMasterValueInput, ArticleExtraction, EvidenceItem, FieldGroup, JobSummary, MasterField, MasterValue } from "../../types";
 import { ValueCard } from "./ValueCard";
 
 type Filter = "with_values" | "review" | "all";
@@ -12,16 +13,20 @@ interface Props {
   extraction: ArticleExtraction;
   onExtract: (force: boolean) => Promise<void>;
   onJobAction: (action: "pause" | "cancel") => Promise<void>;
+  /** Queue local-model proposals for open narrative fields. */
+  onProposeWithAi?: () => Promise<void>;
+  aiJob?: JobSummary;
   onValueChanged: (value: MasterValue) => void;
   onShowEvidence: (evidence: EvidenceItem) => void;
 }
 
-export function MasterRecordPanel({ articleId, extraction, onExtract, onJobAction, onValueChanged, onShowEvidence }: Props) {
+export function MasterRecordPanel({ articleId, extraction, onExtract, onJobAction, onProposeWithAi, aiJob, onValueChanged, onShowEvidence }: Props) {
   const [filter, setFilter] = useState<Filter>("with_values");
   const [collapsed, setCollapsed] = useState<Set<FieldGroup>>(new Set());
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const run = extraction.runs[0];
+  const run = extraction.runs.find((item) => item.provider !== "ollama") ?? extraction.runs[0];
+  const aiRun = extraction.runs.find((item) => item.provider === "ollama");
   const job = extraction.activeJob;
 
   const byField = useMemo(() => {
@@ -87,6 +92,7 @@ export function MasterRecordPanel({ articleId, extraction, onExtract, onJobActio
               <div>
                 <p className="text-xs font-semibold text-slate-700">{run.status === "completed" ? "Ficha generada" : `Última extracción: ${run.status === "failed" ? "fallida" : "cancelada"}`}</p>
                 <p className="mt-0.5 text-[10px] text-slate-400">{formatDateTime(run.completedAt ?? run.startedAt)} · {run.model ?? run.provider} · {run.promptVersion} · extractor {run.extractorVersion ?? "?"}</p>
+                {aiRun && <p className="mt-0.5 text-[10px] text-slate-400">IA local: {aiRun.model} · {aiRun.promptVersion} · {formatDateTime(aiRun.completedAt ?? aiRun.startedAt)}</p>}
               </div>
               <button className="button-secondary shrink-0 px-2.5 py-1.5 text-[11px]" disabled={busy} onClick={() => void act(() => onExtract(true))}>
                 {busy ? <LoaderCircle className="size-3 animate-spin" /> : <RefreshCw className="size-3" />} Re-extraer
@@ -109,6 +115,19 @@ export function MasterRecordPanel({ articleId, extraction, onExtract, onJobActio
               {busy ? <LoaderCircle className="size-3.5 animate-spin" /> : <ScanSearch className="size-3.5" />} Extraer ahora
             </button>
           </div>
+        )}
+        {run?.status === "completed" && !job && (
+          <div className="mt-3 flex flex-wrap gap-2 border-t border-slate-200/70 pt-3">
+            {onProposeWithAi && (
+              <button className="button-secondary px-2.5 py-1.5 text-[11px]" disabled={busy || Boolean(aiJob)} onClick={() => void act(onProposeWithAi)} title="Un modelo local de Ollama propone los campos narrativos vacíos; solo se guardan propuestas con cita verificada">
+                <Sparkles className="size-3" /> Proponer campos con IA local
+              </button>
+            )}
+            <Link className="button-secondary px-2.5 py-1.5 text-[11px]" to={`/asistente?scope=article&id=${articleId}`}><MessageSquareText className="size-3" /> Preguntar a este artículo</Link>
+          </div>
+        )}
+        {aiJob && (
+          <p className="mt-2 flex items-center gap-1.5 text-[11px] text-slate-500"><LoaderCircle className="size-3 animate-spin text-teal-600" /> IA local: {aiJob.message ?? "En cola"} ({Math.round(aiJob.progress * 100)}%)</p>
         )}
         {error && <p className="mt-2 text-[11px] text-rose-700">{error}</p>}
       </section>

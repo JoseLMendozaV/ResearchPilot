@@ -1,5 +1,6 @@
 import { FormEvent, useCallback, useEffect, useState } from "react";
 import { Check, Database, Download, HardDrive, LoaderCircle, RefreshCw, ScanText, ShieldCheck, Sparkles, TriangleAlert } from "lucide-react";
+import { AiSettings } from "../components/settings/AiSettings";
 import { backend, errorMessage } from "../lib/backend";
 import { onJobChanged } from "../lib/events";
 import { jobStatusLabels } from "../lib/extraction";
@@ -72,8 +73,8 @@ export function SettingsPage({ settings, databasePath, saveSettings }: Props) {
         />
       </SettingsSection>
 
-      <SettingsSection icon={Sparkles} title="Inteligencia artificial" description="Ollama es el proveedor local predeterminado.">
-        <div className="grid grid-cols-3 gap-4">
+      <SettingsSection icon={Sparkles} title="Inteligencia artificial" description="Ollama local por defecto. Los modelos se descubren del servidor; guarda los cambios al final de la página.">
+        <div className="mb-5 grid grid-cols-2 gap-4">
           <label className="label">Proveedor
             <select className="input mt-1.5" value={form.aiProvider} onChange={(event) => setForm({ ...form, aiProvider: event.target.value as AppSettings["aiProvider"] })}>
               <option value="ollama">Ollama (local)</option><option value="openai">OpenAI</option><option value="anthropic">Anthropic</option>
@@ -82,10 +83,8 @@ export function SettingsPage({ settings, databasePath, saveSettings }: Props) {
           <label className="label">URL de Ollama
             <input className="input mt-1.5" value={form.ollamaBaseUrl} onChange={(event) => setForm({ ...form, ollamaBaseUrl: event.target.value })} />
           </label>
-          <label className="label">Modelo local
-            <input className="input mt-1.5" value={form.ollamaModel} onChange={(event) => setForm({ ...form, ollamaModel: event.target.value })} placeholder="Se descubrirá desde Ollama" />
-          </label>
         </div>
+        <AiSettings form={form} setForm={setForm} />
         {form.aiProvider !== "ollama" && !form.allowExternalProcessing && (
           <p className="mt-3 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800">El proveedor está seleccionado, pero los envíos externos siguen bloqueados.</p>
         )}

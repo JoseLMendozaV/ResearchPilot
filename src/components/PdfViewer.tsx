@@ -91,7 +91,7 @@ export function PdfViewer({ path, title, focus }: { path: string; title: string;
   })() : null;
 
   useEffect(() => {
-    if (box) highlightRef.current?.scrollIntoView({ block: "center", behavior: "smooth" });
+    if (box) highlightRef.current?.scrollIntoView?.({ block: "center", behavior: "smooth" });
   }, [box?.left, box?.top, focus?.key]);
 
   if (loading) return <div className="grid h-full place-items-center"><div className="text-center"><LoaderCircle className="mx-auto size-6 animate-spin text-teal-600" /><p className="mt-2 text-xs text-slate-400">Abriendo documento local…</p></div></div>;

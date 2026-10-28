@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ArticleExtraction, MasterValue } from "../../types";
 import { MasterRecordPanel } from "./MasterRecordPanel";
@@ -54,7 +55,7 @@ function renderPanel(overrides: Partial<React.ComponentProps<typeof MasterRecord
     onShowEvidence: vi.fn(),
     ...overrides,
   };
-  render(<MasterRecordPanel {...props} />);
+  render(<MemoryRouter><MasterRecordPanel {...props} /></MemoryRouter>);
   return props;
 }
 

@@ -8,7 +8,7 @@ Cada fase exige compilación, pruebas pertinentes, regresión de fases anteriore
 | 1 — Aplicación base | Rust, Node, Xcode CLI | `.app` y DMG ARM64; SQLite migra; navegación, revisión y configuración persisten; pruebas verdes |
 | 2 — Biblioteca y visor ✅ | PDF.js, parser RIS/BibTeX/CSV, fixtures | Cumplido: importación individual/lote; SHA-256; candidatos duplicados; colecciones; FTS5; página navegable; PDF inválido aislado |
 | 3 — Extracción ✅ | Sidecar empaquetado, parser PDF, GROBID/OCR opcionales | Cumplido: JSON tipado; timeout/cancelación/progreso; texto por página; ficha editable; cada propuesta enlaza evidencia; reinicio recupera trabajos |
-| 4 — Ollama y RAG | Ollama detectado, interfaz vectorial | Descubrimiento de modelos; LLM/embedding separados; FTS5+vector; respuestas con citas navegables; “no encontrado” sin invención |
+| 4 — Ollama y RAG ✅ | Ollama detectado, interfaz vectorial | Cumplido (probado con servidor simulado): descubrimiento de modelos; LLM/embedding separados; FTS5+vector; respuestas con citas navegables; “no encontrado” sin invención |
 | 5 — AI Gateway | Keychain, SDK oficiales | OpenAI/Anthropic opt-in por tarea; prueba de conexión; confirmación de envío; tokens/coste registrados; modo sin red verificable |
 | 6 — Metodología SLR | Biblioteca estable | CRUD completo de Leer/Control/RQs/Cadena/I_E/Calidad/Extraccion; protocolo versionado; doble revisión y conflictos; auditoría |
 | 7 — Matrices/exportación | Datos validados Fase 6 | XLSX de siete hojas compatible; versión ampliada; CSV/JSON/RIS/BibTeX/Markdown/LaTeX; celdas enlazan procedencia |

@@ -1,16 +1,29 @@
+mod ai_fields;
 mod bibliography;
 mod db;
 mod error;
 mod extraction;
+mod indexing;
 mod jobs;
 mod library;
 mod models;
+mod ollama;
+mod rag;
 mod worker;
 
-use std::{path::PathBuf, sync::Arc};
+use std::{
+    collections::HashMap,
+    path::PathBuf,
+    sync::{
+        Arc, Mutex,
+        atomic::{AtomicBool, Ordering},
+    },
+    time::Duration,
+};
 
 use db::Database;
 use error::{AppError, AppResult};
+use indexing::IndexStatus;
 use jobs::JobRunner;
 use models::{
     AddMasterValueInput, AppSettings, ArticleExtraction, BootstrapData, CreateProjectInput,
@@ -18,6 +31,8 @@ use models::{
     LibraryCollection, MasterValue, ReviewProject, UpdateArticleMetadataInput,
     UpdateMasterValueInput, ValueRevision,
 };
+use ollama::{OllamaClient, OllamaStatus};
+use rag::{AskInput, ConversationDetail, ConversationSummary, SearchOutcome};
 use tauri::{Emitter, Manager, RunEvent, State};
 use worker::WorkerEnvironment;
 
@@ -230,6 +245,175 @@ fn list_recent_evidence(
     database.recent_evidence(limit)
 }
 
+/// Cancellation flags for in-flight assistant questions, keyed by request id.
+#[derive(Default)]
+struct AssistantRequests(Mutex<HashMap<String, Arc<AtomicBool>>>);
+
+#[tauri::command]
+async fn ollama_status(database: State<'_, Database>) -> AppResult<OllamaStatus> {
+    let settings = database.settings()?;
+    tauri::async_runtime::spawn_blocking(move || ollama::status(&settings))
+        .await
+        .map_err(|error| AppError::Ai(error.to_string()))
+}
+
+#[tauri::command]
+fn pull_ollama_model(
+    database: State<'_, Database>,
+    runner: State<'_, JobRunner>,
+    model: String,
+) -> AppResult<JobSummary> {
+    let job = database.enqueue_model_pull(&model)?;
+    runner.wake();
+    Ok(job)
+}
+
+#[tauri::command]
+fn index_status(database: State<'_, Database>) -> AppResult<IndexStatus> {
+    database.index_status()
+}
+
+#[tauri::command]
+fn enqueue_indexing(
+    database: State<'_, Database>,
+    runner: State<'_, JobRunner>,
+    article_ids: Option<Vec<String>>,
+) -> AppResult<Vec<EnqueueResult>> {
+    let results = database.enqueue_indexing(article_ids.as_deref())?;
+    runner.wake();
+    Ok(results)
+}
+
+#[tauri::command]
+fn enqueue_ai_fields(
+    database: State<'_, Database>,
+    runner: State<'_, JobRunner>,
+    article_id: String,
+) -> AppResult<JobSummary> {
+    let job = database.enqueue_ai_fields(&article_id)?;
+    runner.wake();
+    Ok(job)
+}
+
+fn query_embedding(settings: &AppSettings, text: &str) -> Option<Vec<f32>> {
+    let model = settings.ollama_embedding_model.trim();
+    if model.is_empty() || settings.rag_mode == "lexical" {
+        return None;
+    }
+    OllamaClient::from_settings(settings, Duration::from_secs(60))
+        .ok()?
+        .embed(model, &[text.to_owned()])
+        .ok()?
+        .pop()
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SearchInput {
+    query: String,
+    scope_type: String,
+    scope_id: Option<String>,
+    year_from: Option<i64>,
+    year_to: Option<i64>,
+    mode: Option<String>,
+}
+
+#[tauri::command]
+async fn search_chunks(
+    database: State<'_, Database>,
+    input: SearchInput,
+) -> AppResult<SearchOutcome> {
+    let database = database.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut settings = database.settings()?;
+        if let Some(mode) = input
+            .mode
+            .filter(|mode| ["hybrid", "lexical", "semantic"].contains(&mode.as_str()))
+        {
+            settings.rag_mode = mode;
+        }
+        let scope = database.resolve_scope(
+            &input.scope_type,
+            input.scope_id.as_deref(),
+            input.year_from,
+            input.year_to,
+        )?;
+        let vector = query_embedding(&settings, &input.query);
+        database.search_chunks(
+            &input.query,
+            &scope,
+            &settings.rag_mode,
+            settings.ollama_embedding_model.trim(),
+            vector.as_deref(),
+            20,
+        )
+    })
+    .await
+    .map_err(|error| AppError::Ai(error.to_string()))?
+}
+
+#[tauri::command]
+async fn ask_assistant(
+    database: State<'_, Database>,
+    requests: State<'_, AssistantRequests>,
+    input: AskInput,
+) -> AppResult<ConversationDetail> {
+    let flag = Arc::new(AtomicBool::new(false));
+    requests
+        .0
+        .lock()
+        .expect("requests lock")
+        .insert(input.request_id.clone(), flag.clone());
+    let database = database.inner().clone();
+    let request_id = input.request_id.clone();
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        let settings = database.settings()?;
+        let client = OllamaClient::from_settings(
+            &settings,
+            Duration::from_secs(settings.ai_timeout_seconds as u64),
+        )?;
+        database.ask_assistant(
+            &input,
+            &|text| query_embedding(&settings, text),
+            &client,
+            &|| flag.load(Ordering::SeqCst),
+        )
+    })
+    .await
+    .map_err(|error| AppError::Ai(error.to_string()))?;
+    requests
+        .0
+        .lock()
+        .expect("requests lock")
+        .remove(&request_id);
+    result
+}
+
+#[tauri::command]
+fn cancel_assistant(requests: State<'_, AssistantRequests>, request_id: String) {
+    if let Some(flag) = requests.0.lock().expect("requests lock").get(&request_id) {
+        flag.store(true, Ordering::SeqCst);
+    }
+}
+
+#[tauri::command]
+fn list_conversations(database: State<'_, Database>) -> AppResult<Vec<ConversationSummary>> {
+    database.conversations()
+}
+
+#[tauri::command]
+fn get_conversation(
+    database: State<'_, Database>,
+    conversation_id: String,
+) -> AppResult<ConversationDetail> {
+    database.conversation(&conversation_id)
+}
+
+#[tauri::command]
+fn delete_conversation(database: State<'_, Database>, conversation_id: String) -> AppResult<()> {
+    database.delete_conversation(&conversation_id)
+}
+
 fn worker_environment(
     app: &tauri::App,
     app_data_dir: &std::path::Path,
@@ -279,6 +463,7 @@ pub fn run() {
             runner.start()?;
             app.manage(database);
             app.manage(runner);
+            app.manage(AssistantRequests::default());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -306,7 +491,18 @@ pub fn run() {
             add_master_value,
             master_value_history,
             revert_master_value,
-            list_recent_evidence
+            list_recent_evidence,
+            ollama_status,
+            pull_ollama_model,
+            index_status,
+            enqueue_indexing,
+            enqueue_ai_fields,
+            search_chunks,
+            ask_assistant,
+            cancel_assistant,
+            list_conversations,
+            get_conversation,
+            delete_conversation
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

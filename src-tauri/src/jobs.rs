@@ -31,6 +31,12 @@ use crate::{
 
 pub const EXTRACTION_JOB: &str = "scientific_extraction";
 pub const SETUP_JOB: &str = "extractor_setup";
+pub const INDEX_JOB: &str = "rag_index";
+pub const AI_FIELDS_JOB: &str = "ai_field_extraction";
+pub const MODEL_PULL_JOB: &str = "model_pull";
+/// SQL list of the job types processed by the runner.
+const RUNNER_JOB_TYPES: &str =
+    "'scientific_extraction', 'extractor_setup', 'rag_index', 'ai_field_extraction', 'model_pull'";
 const MAX_LINE_BYTES: u64 = 256 * 1024 * 1024;
 const PROGRESS_INTERVAL: Duration = Duration::from_millis(400);
 
@@ -163,6 +169,7 @@ impl JobRunner {
         let result = match job.job_type.as_str() {
             EXTRACTION_JOB => self.run_extraction(&job),
             SETUP_JOB => self.run_setup(&job),
+            INDEX_JOB | AI_FIELDS_JOB | MODEL_PULL_JOB => self.run_in_process(&job),
             other => Err(AppError::Worker(format!(
                 "Tipo de tarea desconocido: {other}"
             ))),
@@ -174,7 +181,119 @@ impl JobRunner {
         }
         *self.inner.current.lock().expect("current lock") = None;
         self.notify(&job.id);
+        if job.job_type == EXTRACTION_JOB
+            && let Some(article_id) = &job.article_id
+            && self.inner.database.settings()?.auto_index_after_extraction
+        {
+            // Index whatever text exists, even after a failed layout extraction.
+            let summary = self.inner.database.job_summary(&job.id)?;
+            if matches!(summary.status.as_str(), "completed" | "failed") {
+                for queued in self
+                    .inner
+                    .database
+                    .enqueue_indexing(Some(std::slice::from_ref(article_id)))?
+                {
+                    if let Some(job_id) = queued.job_id {
+                        self.notify(&job_id);
+                    }
+                }
+            }
+        }
         Ok(true)
+    }
+
+    fn control_requested(&self, job_id: &str) -> Option<Control> {
+        self.inner
+            .current
+            .lock()
+            .expect("current lock")
+            .as_ref()
+            .filter(|running| running.job_id == job_id)
+            .and_then(|running| running.control)
+    }
+
+    /// Jobs that run inside this process (HTTP to Ollama, SQLite work). They
+    /// check for pause/cancel between steps instead of killing a child.
+    fn run_in_process(&self, job: &ClaimedJob) -> AppResult<()> {
+        let database = &self.inner.database;
+        let settings = database.settings()?;
+        let cancelled = || self.control_requested(&job.id).is_some();
+        let last_update = Mutex::new(Instant::now() - PROGRESS_INTERVAL);
+        let progress = |fraction: f64, message: &str| -> AppResult<()> {
+            let mut last = last_update.lock().expect("progress lock");
+            if last.elapsed() >= PROGRESS_INTERVAL {
+                *last = Instant::now();
+                database.update_job_progress(&job.id, fraction, "running", Some(message))?;
+                self.notify(&job.id);
+            }
+            Ok(())
+        };
+        let embed = |text: &str| -> Option<Vec<f32>> {
+            let model = settings.ollama_embedding_model.trim();
+            if model.is_empty() {
+                return None;
+            }
+            let client =
+                crate::ollama::OllamaClient::from_settings(&settings, Duration::from_secs(60))
+                    .ok()?;
+            client.embed(model, &[text.to_owned()]).ok()?.pop()
+        };
+        let article_id = job.article_id.as_deref().unwrap_or_default();
+        let result = match job.job_type.as_str() {
+            INDEX_JOB => database.index_article(article_id, &settings, &progress, &cancelled),
+            AI_FIELDS_JOB => database.run_ai_fields(
+                &job.id, article_id, &settings, &embed, &progress, &cancelled,
+            ),
+            _ => self.run_model_pull(job, &settings, &progress, &cancelled),
+        };
+        match result {
+            Ok(summary) => database.finish_job(&job.id, "completed", Some(&summary), None),
+            Err(AppError::Cancelled) => match self.control_requested(&job.id) {
+                Some(Control::Pause) => database.pause_running_job(&job.id),
+                _ => database.finish_job(
+                    &job.id,
+                    "cancelled",
+                    Some("Cancelada por el usuario"),
+                    None,
+                ),
+            },
+            Err(error) => database.finish_job(&job.id, "failed", None, Some(&error.to_string())),
+        }
+    }
+
+    fn run_model_pull(
+        &self,
+        job: &ClaimedJob,
+        settings: &AppSettings,
+        progress: &dyn Fn(f64, &str) -> AppResult<()>,
+        cancelled: &dyn Fn() -> bool,
+    ) -> AppResult<String> {
+        let input: Value = self
+            .inner
+            .database
+            .open()?
+            .query_row(
+                "SELECT input_json FROM ingestion_jobs WHERE id = ?1",
+                [&job.id],
+                |row| row.get::<_, String>(0),
+            )
+            .map(|text| serde_json::from_str(&text).unwrap_or(Value::Null))?;
+        let model = input["model"].as_str().unwrap_or_default().to_owned();
+        // Downloads can take a long time on slow connections.
+        let client =
+            crate::ollama::OllamaClient::from_settings(settings, Duration::from_secs(6 * 3600))?;
+        client.pull(
+            &model,
+            |status| {
+                let total = status["total"].as_f64().unwrap_or(0.0);
+                let completed = status["completed"].as_f64().unwrap_or(0.0);
+                let fraction = if total > 0.0 { completed / total } else { 0.0 };
+                let label = status["status"].as_str().unwrap_or("descargando");
+                progress(fraction.clamp(0.0, 0.99), &format!("{model}: {label}"))
+            },
+            cancelled,
+        )?;
+        Ok(format!("Modelo {model} descargado en Ollama"))
     }
 
     pub fn cancel(&self, job_id: &str) -> AppResult<JobSummary> {
@@ -778,7 +897,7 @@ impl Database {
         let connection = self.open()?;
         let mut statement = connection.prepare(&format!(
             "{JOB_SELECT}
-             WHERE j.job_type IN ('{EXTRACTION_JOB}', '{SETUP_JOB}')
+             WHERE j.job_type IN ({RUNNER_JOB_TYPES})
              ORDER BY CASE j.status WHEN 'running' THEN 0 WHEN 'queued' THEN 1 WHEN 'paused' THEN 2 ELSE 3 END,
                       CASE WHEN j.status IN ('queued', 'paused') THEN j.created_at END ASC,
                       j.updated_at DESC
@@ -919,6 +1038,28 @@ impl Database {
             .collect())
     }
 
+    pub fn enqueue_model_pull(&self, model: &str) -> AppResult<JobSummary> {
+        let model = model.trim();
+        if model.is_empty()
+            || model.len() > 200
+            || !model
+                .chars()
+                .all(|character| character.is_ascii_alphanumeric() || "-_.:/".contains(character))
+        {
+            return Err(AppError::Validation(
+                "Nombre de modelo no válido (ejemplo: nombre:etiqueta)".into(),
+            ));
+        }
+        let job_id = Uuid::new_v4().to_string();
+        let timestamp = now();
+        self.open()?.execute(
+            "INSERT INTO ingestion_jobs (id, job_type, status, progress, input_json, message, max_attempts, created_at, updated_at)
+             VALUES (?1, ?2, 'queued', 0, ?3, 'En cola', 1, ?4, ?4)",
+            params![job_id, MODEL_PULL_JOB, json!({ "model": model }).to_string(), timestamp],
+        )?;
+        self.job_summary(&job_id)
+    }
+
     pub fn enqueue_setup_job(&self) -> AppResult<JobSummary> {
         let connection = self.open()?;
         let active: Option<String> = connection
@@ -954,7 +1095,7 @@ impl Database {
             &format!(
                 "UPDATE ingestion_jobs SET status = 'queued', progress = 0, stage = NULL, updated_at = ?1,
                         message = 'Recuperada tras un cierre; se procesará de nuevo'
-                 WHERE status = 'running' AND job_type IN ('{EXTRACTION_JOB}', '{SETUP_JOB}')"
+                 WHERE status = 'running' AND job_type IN ({RUNNER_JOB_TYPES})"
             ),
             [&timestamp],
         )?)
@@ -968,7 +1109,7 @@ impl Database {
             .query_row(
                 &format!(
                     "SELECT id, job_type, article_id, attempts + 1, max_attempts FROM ingestion_jobs
-                     WHERE status = 'queued' AND job_type IN ('{EXTRACTION_JOB}', '{SETUP_JOB}')
+                     WHERE status = 'queued' AND job_type IN ({RUNNER_JOB_TYPES})
                      ORDER BY created_at LIMIT 1"
                 ),
                 [],

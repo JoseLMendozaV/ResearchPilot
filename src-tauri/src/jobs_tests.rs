@@ -58,6 +58,10 @@ fn fixture() -> Fixture {
         environment(&worker_root, None),
         Arc::new(|_| {}),
     );
+    // These tests exercise extraction alone; the indexing chain has its own test.
+    let mut settings = database.settings().expect("settings");
+    settings.auto_index_after_extraction = false;
+    database.update_settings(settings).expect("settings saved");
     Fixture {
         directory,
         database,
@@ -692,4 +696,41 @@ fn real_worker_extracts_traceable_evidence() {
         .query_row("SELECT text_source FROM document_pages p JOIN document_files d ON d.id = p.document_file_id WHERE d.article_id = ?1 AND p.page_number = 1", [&article_id], |row| row.get(0))
         .expect("text source");
     assert_eq!(source, "pdf_text");
+}
+
+#[test]
+fn completed_extraction_queues_indexing_of_the_article() {
+    let fixture = fixture();
+    let mut settings = fixture.database.settings().expect("settings");
+    settings.auto_index_after_extraction = true;
+    fixture
+        .database
+        .update_settings(settings)
+        .expect("settings");
+    fixture.fake_result(payload(&fixture.sha256, &["10.1234/a"]));
+    fixture.enqueue(false);
+    fixture.runner.run_once().expect("extraction");
+    let jobs = fixture.database.list_jobs(10).expect("jobs");
+    let index = jobs
+        .iter()
+        .find(|job| job.job_type == INDEX_JOB)
+        .expect("index job queued");
+    assert_eq!(
+        (index.status.as_str(), index.article_id.as_deref()),
+        ("queued", Some(fixture.article_id.as_str()))
+    );
+
+    fixture.runner.run_once().expect("indexing");
+    let index = fixture.database.job_summary(&index.id).expect("job");
+    assert_eq!(index.status, "completed", "{index:?}");
+    assert!(
+        index
+            .message
+            .unwrap_or_default()
+            .contains("Sin modelo de embeddings"),
+        "lexical index without an embedding model"
+    );
+    let status = fixture.database.index_status().expect("status");
+    assert_eq!((status.indexed_articles, status.embedded_chunks), (1, 0));
+    assert!(status.chunks >= 1);
 }

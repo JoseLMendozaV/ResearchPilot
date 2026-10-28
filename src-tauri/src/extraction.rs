@@ -218,7 +218,7 @@ impl Database {
         // Earlier machine proposals that nobody touched are superseded by this run.
         transaction.execute(
             "UPDATE master_record_values SET superseded_by_run_id = ?1, updated_at = ?2
-             WHERE article_id = ?3 AND superseded_by_run_id IS NULL AND origin <> 'human'
+             WHERE article_id = ?3 AND superseded_by_run_id IS NULL AND origin IN ('rules', 'ocr', 'grobid')
                AND revision_number = 1 AND status IN ('proposed', 'needs_review', 'not_found')",
             params![run_id, timestamp, article_id],
         )?;
@@ -412,18 +412,7 @@ impl Database {
             not_found += 1;
         }
 
-        // Single-valued fields with competing values need a human decision.
-        transaction.execute(
-            "UPDATE master_record_values SET status = 'needs_review', updated_at = ?1
-             WHERE article_id = ?2 AND superseded_by_run_id IS NULL AND status = 'proposed'
-               AND field_key IN (
-                 SELECT v.field_key FROM master_record_values v
-                 JOIN master_record_fields f ON f.field_key = v.field_key AND f.multi_valued = 0
-                 WHERE v.article_id = ?2 AND v.superseded_by_run_id IS NULL
-                   AND v.status IN ('proposed', 'needs_review', 'confirmed')
-                 GROUP BY v.field_key HAVING COUNT(DISTINCT v.value_json) > 1)",
-            params![timestamp, article_id],
-        )?;
+        flag_conflicts(&transaction, article_id)?;
 
         transaction.execute(
             "UPDATE extraction_runs SET status = 'completed', completed_at = ?1, engine = ?2, model = ?3,
@@ -889,7 +878,23 @@ impl Database {
 }
 
 /// `field_key -> (data_type, multi_valued)`
-fn field_catalog(connection: &Connection) -> AppResult<HashMap<String, (String, bool)>> {
+/// Single-valued fields with competing values need a human decision.
+pub(crate) fn flag_conflicts(transaction: &Transaction<'_>, article_id: &str) -> AppResult<()> {
+    transaction.execute(
+        "UPDATE master_record_values SET status = 'needs_review', updated_at = ?1
+         WHERE article_id = ?2 AND superseded_by_run_id IS NULL AND status = 'proposed'
+           AND field_key IN (
+             SELECT v.field_key FROM master_record_values v
+             JOIN master_record_fields f ON f.field_key = v.field_key AND f.multi_valued = 0
+             WHERE v.article_id = ?2 AND v.superseded_by_run_id IS NULL
+               AND v.status IN ('proposed', 'needs_review', 'confirmed')
+             GROUP BY v.field_key HAVING COUNT(DISTINCT v.value_json) > 1)",
+        params![now(), article_id],
+    )?;
+    Ok(())
+}
+
+pub(crate) fn field_catalog(connection: &Connection) -> AppResult<HashMap<String, (String, bool)>> {
     let mut statement = connection
         .prepare("SELECT field_key, data_type, multi_valued FROM master_record_fields")?;
     let rows = statement.query_map([], |row| {
@@ -898,7 +903,7 @@ fn field_catalog(connection: &Connection) -> AppResult<HashMap<String, (String, 
     Ok(rows.collect::<Result<HashMap<_, _>, _>>()?)
 }
 
-fn parse_value(data_type: &str, text: &str) -> AppResult<(String, String)> {
+pub(crate) fn parse_value(data_type: &str, text: &str) -> AppResult<(String, String)> {
     let text = text.trim();
     if text.is_empty() {
         return Ok(("null".into(), String::new()));
@@ -977,7 +982,7 @@ fn local_reviewer(
 }
 
 #[allow(clippy::too_many_arguments)]
-fn insert_revision(
+pub(crate) fn insert_revision(
     transaction: &Transaction<'_>,
     value_id: &str,
     revision: i64,

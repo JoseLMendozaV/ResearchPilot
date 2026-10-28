@@ -6,7 +6,7 @@ import { MasterRecordPanel } from "../components/extraction/MasterRecordPanel";
 import { StructurePanel } from "../components/extraction/StructurePanel";
 import { backend, errorMessage } from "../lib/backend";
 import { onJobChanged } from "../lib/events";
-import type { ArticleExtraction, EvidenceItem, LibraryArticle, LibraryCollection, MasterValue, UpdateArticleMetadataInput, ViewerFocus } from "../types";
+import type { ArticleExtraction, EvidenceItem, JobSummary, LibraryArticle, LibraryCollection, MasterValue, UpdateArticleMetadataInput, ViewerFocus } from "../types";
 
 type Tab = "record" | "structure" | "metadata";
 
@@ -16,6 +16,7 @@ export function ArticleViewerPage({ article, collections, updateMetadata, setArt
   const [extraction, setExtraction] = useState<ArticleExtraction | null>(null);
   const [extractionError, setExtractionError] = useState<string | null>(null);
   const [focus, setFocus] = useState<ViewerFocus | undefined>();
+  const [aiJob, setAiJob] = useState<JobSummary | undefined>();
 
   const loadExtraction = useCallback(async () => {
     try {
@@ -30,6 +31,13 @@ export function ArticleViewerPage({ article, collections, updateMetadata, setArt
     void loadExtraction();
     return onJobChanged((job) => {
       if (job.articleId !== article.id) return;
+      const active = job.status === "queued" || job.status === "running" || job.status === "paused";
+      if (job.jobType === "ai_field_extraction") {
+        setAiJob(active ? job : undefined);
+        if (!active) void loadExtraction();
+        return;
+      }
+      if (job.jobType !== "scientific_extraction") return;
       setExtraction((current) => (current ? { ...current, activeJob: job.status === "queued" || job.status === "running" || job.status === "paused" ? job : undefined } : current));
       if (job.status === "completed" || job.status === "failed" || job.status === "cancelled") void loadExtraction();
     });
@@ -49,6 +57,20 @@ export function ArticleViewerPage({ article, collections, updateMetadata, setArt
     const evidence = extraction.values.flatMap((value) => value.evidence).find((item) => item.id === evidenceParam);
     if (evidence?.page) setFocus({ page: evidence.page, bbox: evidence.bbox, pageWidth: evidence.pageWidth, key: Date.now() });
   }, [evidenceParam, extraction]);
+
+  // Citation links from the assistant: ?page=N&bbox=x0,top,x1,bottom&pw=width
+  const pageParam = Number(searchParams.get("page"));
+  const bboxParam = searchParams.get("bbox");
+  const widthParam = Number(searchParams.get("pw")) || undefined;
+  useEffect(() => {
+    if (!pageParam) return;
+    const bbox = bboxParam?.split(",").map(Number).filter((value) => Number.isFinite(value));
+    setFocus({ page: pageParam, bbox: bbox?.length === 4 ? bbox : undefined, pageWidth: widthParam, key: Date.now() });
+  }, [pageParam, bboxParam, widthParam]);
+
+  async function proposeWithAi() {
+    setAiJob(await backend.enqueueAiFields(article.id));
+  }
 
   const showEvidence = (evidence: EvidenceItem) => {
     if (evidence.page) setFocus({ page: evidence.page, bbox: evidence.bbox, pageWidth: evidence.pageWidth, key: Date.now() });
@@ -99,7 +121,7 @@ export function ArticleViewerPage({ article, collections, updateMetadata, setArt
           {tab !== "metadata" && !extraction && !extractionError && <div className="grid h-40 place-items-center"><LoaderCircle className="size-5 animate-spin text-teal-600" /></div>}
           {tab !== "metadata" && extractionError && <p className="rounded-lg bg-rose-50 p-3 text-xs text-rose-700">{extractionError}</p>}
           {tab === "record" && extraction && (
-            <MasterRecordPanel articleId={article.id} extraction={extraction} onExtract={extract} onJobAction={jobAction} onValueChanged={replaceValue} onShowEvidence={showEvidence} />
+            <MasterRecordPanel articleId={article.id} extraction={extraction} onExtract={extract} onJobAction={jobAction} onProposeWithAi={proposeWithAi} aiJob={aiJob} onValueChanged={replaceValue} onShowEvidence={showEvidence} />
           )}
           {tab === "structure" && extraction && (
             <StructurePanel extraction={extraction} onShowPage={(page, bbox) => setFocus({ page, bbox, key: Date.now() })} />

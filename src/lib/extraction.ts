@@ -61,7 +61,18 @@ export const jobStatusTones: Record<JobStatus, string> = {
 export const jobTypeLabels: Record<string, string> = {
   scientific_extraction: "Extracción científica",
   extractor_setup: "Preparar entorno del extractor",
+  rag_index: "Indexación para búsqueda",
+  ai_field_extraction: "Propuestas de IA para la ficha",
+  model_pull: "Descarga de modelo en Ollama",
 };
+
+/** Link to an article page with a highlighted region (used by assistant citations). */
+export function evidenceLink(articleId: string, page: number, bbox?: number[], pageWidth?: number): string {
+  const params = new URLSearchParams({ page: String(page) });
+  if (bbox?.length === 4) params.set("bbox", bbox.map((value) => value.toFixed(1)).join(","));
+  if (pageWidth) params.set("pw", String(pageWidth));
+  return `/biblioteca/${articleId}?${params.toString()}`;
+}
 
 export function isActiveJob(status: JobStatus): boolean {
   return status === "queued" || status === "running" || status === "paused";

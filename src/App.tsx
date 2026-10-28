@@ -10,6 +10,7 @@ import { EvidencePage } from "./pages/EvidencePage";
 import { LibraryPage } from "./pages/LibraryPage";
 import { ProtocolPage } from "./pages/ProtocolPage";
 import { ReviewsPage } from "./pages/ReviewsPage";
+import { AssistantPage } from "./pages/AssistantPage";
 import { SettingsPage } from "./pages/SettingsPage";
 import { TasksPage } from "./pages/TasksPage";
 import "./styles.css";
@@ -54,6 +55,7 @@ export default function App() {
               <Route path="/protocolo" element={<ProtocolPage />} />
               <Route path="/evidencia" element={<EvidencePage stats={app.data.stats} />} />
               <Route path="/tareas" element={<TasksPage {...jobs} />} />
+              <Route path="/asistente" element={<AssistantPage articles={app.data.articles} collections={app.data.collections} defaultModel={app.data.settings.ollamaModel} />} />
               <Route path="/configuracion" element={<SettingsPage settings={app.data.settings} databasePath={app.data.databasePath} saveSettings={app.saveSettings} />} />
               <Route path="*" element={<Navigate to="/" replace />} />
             </>

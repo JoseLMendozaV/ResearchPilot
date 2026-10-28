@@ -54,3 +54,11 @@ erDiagram
 - `master_record_values` admite varios valores por campo; `superseded_by_run_id` oculta propuestas no revisadas de ejecuciones anteriores sin borrarlas.
 - `master_record_value_revisions` es inmutable: editar o restaurar crea una revisión nueva.
 - `not_reported` exige origen humano o revisor (restricción `CHECK`); `not_found` lo usa solo el extractor.
+
+## Recuperación y asistente (Fase 4)
+
+- `document_chunks` (+ `document_chunks_fts`): fragmentos literales por página/sección con `spans_json` (cajas de los bloques de origen).
+- `chunk_embeddings`: clave `(content_sha256, model)`; vectores f32 normalizados. Los embeddings sobreviven a la re-fragmentación.
+- `assistant_conversations` / `assistant_messages`: las citas se guardan como copia (artículo, página, cita, caja), de modo que el historial no depende de que el fragmento siga existiendo.
+- `ai_runs`: cada llamada a un modelo con versión de prompt, hashes, tokens, duración, intentos y estado.
+- Las propuestas de IA usan `master_record_values` con `origin = 'ai'`; cada origen (reglas o IA) solo reemplaza sus propias propuestas no revisadas.

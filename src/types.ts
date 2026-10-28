@@ -19,6 +19,13 @@ export interface AppSettings {
   grobidUrl: string;
   extractionTimeoutSeconds: number;
   extractorPythonPath: string;
+  ollamaEmbeddingModel: string;
+  ollamaExtractionModel: string;
+  autoIndexAfterExtraction: boolean;
+  ragMode: "hybrid" | "lexical" | "semantic";
+  ragTopK: number;
+  ragContextTokens: number;
+  aiTimeoutSeconds: number;
 }
 
 export interface ReviewProject {
@@ -314,4 +321,115 @@ export interface ViewerFocus {
   bbox?: number[];
   pageWidth?: number;
   key: number;
+}
+
+export interface OllamaModel {
+  name: string;
+  sizeBytes: number;
+  family?: string;
+  parameterSize?: string;
+  quantization?: string;
+  capabilities: string[];
+  kind: "chat" | "embedding" | "unknown";
+  contextLength?: number;
+  memoryFit?: "comfortable" | "tight" | "too_large";
+}
+
+export interface OllamaStatus {
+  baseUrl: string;
+  reachable: boolean;
+  version?: string;
+  models: OllamaModel[];
+  systemMemoryBytes?: number;
+  recommendation: string;
+  message?: string;
+}
+
+export interface IndexStatus {
+  articles: number;
+  indexedArticles: number;
+  chunks: number;
+  embeddedChunks: number;
+  embeddingModel: string;
+}
+
+export type ScopeType = "library" | "collection" | "article";
+
+export interface RetrievedChunk {
+  chunkId: string;
+  articleId: string;
+  articleTitle: string;
+  publicationYear?: number;
+  page: number;
+  section?: string;
+  text: string;
+  pageWidth?: number;
+  score: number;
+  lexicalRank?: number;
+  semanticRank?: number;
+}
+
+export interface SearchOutcome {
+  chunks: RetrievedChunk[];
+  mode: "hybrid" | "lexical" | "semantic";
+  warnings: string[];
+}
+
+export interface SearchInput {
+  query: string;
+  scopeType: ScopeType;
+  scopeId?: string;
+  yearFrom?: number;
+  yearTo?: number;
+  mode?: AppSettings["ragMode"];
+}
+
+export interface VerifiedCitation {
+  source: string;
+  quote: string;
+  articleId: string;
+  articleTitle: string;
+  page: number;
+  section?: string;
+  bbox?: number[];
+  pageWidth?: number;
+}
+
+export interface AssistantMessage {
+  id: string;
+  conversationId: string;
+  role: "user" | "assistant";
+  content: string;
+  status: "question" | "answered" | "not_found" | "unsupported" | "failed";
+  citations: VerifiedCitation[];
+  sources: { mode?: string; warnings?: string[]; chunks?: { source: string; articleId: string; articleTitle: string; page: number; section?: string }[] } | null;
+  aiRunId?: string;
+  createdAt: string;
+}
+
+export interface ConversationSummary {
+  id: string;
+  title: string;
+  scopeType: ScopeType;
+  scopeId?: string;
+  scopeLabel?: string;
+  messageCount: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ConversationDetail {
+  conversation: ConversationSummary;
+  messages: AssistantMessage[];
+}
+
+export interface AskInput {
+  requestId: string;
+  conversationId?: string;
+  scopeType: ScopeType;
+  scopeId?: string;
+  yearFrom?: number;
+  yearTo?: number;
+  question: string;
+  model?: string;
 }
