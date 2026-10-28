@@ -33,10 +33,15 @@ const MIGRATIONS: &[(i64, &str, &str)] = &[
         "bibliography import provenance",
         include_str!("../migrations/0004_bibliography_import.sql"),
     ),
+    (
+        5,
+        "scientific extraction, master record and job queue",
+        include_str!("../migrations/0005_scientific_extraction.sql"),
+    ),
 ];
 const REVIEW_TYPES: [&str; 3] = ["systematic_review", "systematic_mapping", "scoping_review"];
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Database {
     pub(crate) path: PathBuf,
     pub(crate) storage_dir: PathBuf,
@@ -114,7 +119,9 @@ impl Database {
         connection
             .query_row(
                 "SELECT researcher_name, default_language, appearance, ai_provider,
-                        local_only, allow_external_processing, ollama_base_url, ollama_model
+                        local_only, allow_external_processing, ollama_base_url, ollama_model,
+                        auto_extract_on_import, ocr_enabled, ocr_languages, grobid_enabled,
+                        grobid_url, extraction_timeout_seconds, extractor_python_path
                  FROM app_settings WHERE id = 1",
                 [],
                 |row| {
@@ -127,6 +134,13 @@ impl Database {
                         allow_external_processing: row.get(5)?,
                         ollama_base_url: row.get(6)?,
                         ollama_model: row.get(7)?,
+                        auto_extract_on_import: row.get(8)?,
+                        ocr_enabled: row.get(9)?,
+                        ocr_languages: row.get(10)?,
+                        grobid_enabled: row.get(11)?,
+                        grobid_url: row.get(12)?,
+                        extraction_timeout_seconds: row.get(13)?,
+                        extractor_python_path: row.get(14)?,
                     })
                 },
             )
@@ -140,7 +154,10 @@ impl Database {
             "UPDATE app_settings
              SET researcher_name = ?1, default_language = ?2, appearance = ?3,
                  ai_provider = ?4, local_only = ?5, allow_external_processing = ?6,
-                 ollama_base_url = ?7, ollama_model = ?8, updated_at = ?9
+                 ollama_base_url = ?7, ollama_model = ?8, updated_at = ?9,
+                 auto_extract_on_import = ?10, ocr_enabled = ?11, ocr_languages = ?12,
+                 grobid_enabled = ?13, grobid_url = ?14, extraction_timeout_seconds = ?15,
+                 extractor_python_path = ?16
              WHERE id = 1",
             params![
                 settings.researcher_name.trim(),
@@ -152,6 +169,13 @@ impl Database {
                 settings.ollama_base_url.trim(),
                 settings.ollama_model.trim(),
                 now(),
+                settings.auto_extract_on_import,
+                settings.ocr_enabled,
+                settings.ocr_languages.trim(),
+                settings.grobid_enabled,
+                settings.grobid_url.trim().trim_end_matches('/'),
+                settings.extraction_timeout_seconds,
+                settings.extractor_python_path.trim(),
             ],
         )?;
         self.settings()
@@ -244,6 +268,18 @@ impl Database {
             )?,
             research_questions: count(&connection, "research_questions")?,
             evidence_spans: count(&connection, "evidence_spans")?,
+            active_jobs: connection.query_row(
+                "SELECT COUNT(*) FROM ingestion_jobs WHERE status IN ('queued', 'running', 'paused')",
+                [],
+                |row| row.get(0),
+            )?,
+            values_to_review: connection.query_row(
+                "SELECT COUNT(*) FROM master_record_values v JOIN articles a ON a.id = v.article_id
+                 WHERE v.superseded_by_run_id IS NULL AND a.deleted_at IS NULL
+                   AND v.status IN ('proposed', 'needs_review')",
+                [],
+                |row| row.get(0),
+            )?,
         })
     }
 }
@@ -272,6 +308,44 @@ fn validate_settings(settings: &AppSettings) -> AppResult<()> {
     if settings.local_only && settings.allow_external_processing {
         return Err(AppError::Validation(
             "El procesamiento externo debe estar desactivado en modo solo local".into(),
+        ));
+    }
+    let languages = settings.ocr_languages.trim();
+    if languages.is_empty()
+        || languages.split('+').any(|code| {
+            !(3..=16).contains(&code.len())
+                || !code
+                    .chars()
+                    .all(|character| character.is_ascii_alphabetic() || character == '_')
+        })
+    {
+        return Err(AppError::Validation(
+            "Idiomas de OCR inválidos; usa códigos Tesseract como eng o eng+spa".into(),
+        ));
+    }
+    if !(30..=7200).contains(&settings.extraction_timeout_seconds) {
+        return Err(AppError::Validation(
+            "El tiempo máximo de extracción debe estar entre 30 y 7200 segundos".into(),
+        ));
+    }
+    let grobid_url = settings.grobid_url.trim();
+    if !(grobid_url.starts_with("http://") || grobid_url.starts_with("https://")) {
+        return Err(AppError::Validation(
+            "La URL de GROBID debe usar http o https".into(),
+        ));
+    }
+    if settings.grobid_enabled
+        && !crate::worker::is_loopback_url(grobid_url)
+        && !(settings.allow_external_processing && !settings.local_only)
+    {
+        return Err(AppError::Validation(
+            "Un GROBID fuera de este equipo requiere desactivar el modo solo local y autorizar el procesamiento externo".into(),
+        ));
+    }
+    let python = settings.extractor_python_path.trim();
+    if !python.is_empty() && !Path::new(python).is_absolute() {
+        return Err(AppError::Validation(
+            "La ruta de Python debe ser absoluta o quedar vacía".into(),
         ));
     }
     Ok(())

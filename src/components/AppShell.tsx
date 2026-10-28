@@ -4,6 +4,7 @@ import {
   FlaskConical,
   FolderKanban,
   LayoutDashboard,
+  ListChecks,
   Settings,
   ShieldCheck,
 } from "lucide-react";
@@ -17,6 +18,7 @@ const navigation = [
   { to: "/revisiones", label: "nav.reviews" as MessageKey, icon: FolderKanban },
   { to: "/protocolo", label: "nav.protocol" as MessageKey, icon: FlaskConical },
   { to: "/evidencia", label: "nav.evidence" as MessageKey, icon: FileSearch },
+  { to: "/tareas", label: "nav.tasks" as MessageKey, icon: ListChecks },
 ];
 
 const titles: Record<string, { title: MessageKey; subtitle: MessageKey }> = {
@@ -25,6 +27,7 @@ const titles: Record<string, { title: MessageKey; subtitle: MessageKey }> = {
   "/revisiones": { title: "header.reviews.title", subtitle: "header.reviews.subtitle" },
   "/protocolo": { title: "header.protocol.title", subtitle: "header.protocol.subtitle" },
   "/evidencia": { title: "header.evidence.title", subtitle: "header.evidence.subtitle" },
+  "/tareas": { title: "header.tasks.title", subtitle: "header.tasks.subtitle" },
   "/configuracion": { title: "header.settings.title", subtitle: "header.settings.subtitle" },
 };
 

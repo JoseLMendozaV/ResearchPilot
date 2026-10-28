@@ -2,6 +2,7 @@ import { lazy, Suspense, useEffect } from "react";
 import { HashRouter, Navigate, Route, Routes, useParams } from "react-router-dom";
 import { AppShell } from "./components/AppShell";
 import { ErrorView, LoadingView } from "./components/StateViews";
+import { useJobs } from "./hooks/useJobs";
 import { useResearchPilot } from "./hooks/useResearchPilot";
 import { I18nProvider } from "./i18n/I18nProvider";
 import { DashboardPage } from "./pages/DashboardPage";
@@ -10,6 +11,7 @@ import { LibraryPage } from "./pages/LibraryPage";
 import { ProtocolPage } from "./pages/ProtocolPage";
 import { ReviewsPage } from "./pages/ReviewsPage";
 import { SettingsPage } from "./pages/SettingsPage";
+import { TasksPage } from "./pages/TasksPage";
 import "./styles.css";
 
 const ArticleViewerPage = lazy(() =>
@@ -18,6 +20,8 @@ const ArticleViewerPage = lazy(() =>
 
 export default function App() {
   const app = useResearchPilot();
+  // Finished jobs change dashboard counters (evidence, values to review).
+  const jobs = useJobs(() => void app.refreshQuietly());
   const appearance = app.data?.settings.appearance ?? "system";
 
   useEffect(() => {
@@ -49,6 +53,7 @@ export default function App() {
               <Route path="/revisiones" element={<ReviewsPage projects={app.data.projects} createProject={app.createProject} />} />
               <Route path="/protocolo" element={<ProtocolPage />} />
               <Route path="/evidencia" element={<EvidencePage stats={app.data.stats} />} />
+              <Route path="/tareas" element={<TasksPage {...jobs} />} />
               <Route path="/configuracion" element={<SettingsPage settings={app.data.settings} databasePath={app.data.databasePath} saveSettings={app.saveSettings} />} />
               <Route path="*" element={<Navigate to="/" replace />} />
             </>

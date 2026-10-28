@@ -12,6 +12,7 @@ Se inspeccionaron los metadatos de todos los paquetes instalados por npm y Cargo
 - No se detectaron dependencias AGPL ni GPL-only instaladas.
 - La licencia propia de ResearchPilot aún debe decidirse antes de distribuir código o binarios.
 - Dependencias incorporadas en Fase 2: PDF.js (Apache-2.0), `lopdf` (MIT), `csv` (MIT/Unlicense) y el diálogo oficial de Tauri (Apache-2.0/MIT).
+- Fase 3 (Python, no incluidas en el binario; se instalan en el entorno del extractor tras confirmación): `pdfplumber` 0.11.10 (MIT), `pdfminer.six` (MIT), `pypdfium2` (Apache-2.0 o BSD-3-Clause; incluye binarios de PDFium bajo licencias BSD/Apache), `Pillow` (MIT-CMU), `charset-normalizer` (MIT), `cryptography` (Apache-2.0 o BSD-3-Clause). Tesseract (Apache-2.0) y GROBID (Apache-2.0) no se distribuyen: los instala y ejecuta el usuario.
 
 ## Componentes previstos
 

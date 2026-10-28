@@ -4,10 +4,14 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "researchpilot-worker"
-version = "0.1.0"
+version = "0.3.0"
 description = "Local scientific document processing companion for ResearchPilot"
-requires-python = ">=3.11"
+requires-python = ">=3.9"
 dependencies = []
+
+[project.optional-dependencies]
+# Layout, tables and OCR rasterization; without it the worker runs in basic-text mode.
+layout = ["pdfplumber==0.11.10"]
 
 [project.scripts]
 researchpilot-worker = "researchpilot_worker.__main__:main"

@@ -3,6 +3,7 @@ import {
   BookOpen,
   FileCheck2,
   FolderKanban,
+  ListChecks,
   ListTree,
   LockKeyhole,
   Sparkles,
@@ -13,10 +14,12 @@ import type { BootstrapData } from "../types";
 
 export function DashboardPage({ data }: { data: BootstrapData }) {
   const stats = [
-    { label: "Revisiones", value: data.stats.projects, icon: FolderKanban, tone: "teal" },
-    { label: "Artículos", value: data.stats.articles, icon: BookOpen, tone: "blue" },
-    { label: "Preguntas RQ", value: data.stats.researchQuestions, icon: ListTree, tone: "violet" },
-    { label: "Evidencias", value: data.stats.evidenceSpans, icon: FileCheck2, tone: "amber" },
+    { label: "Revisiones", value: data.stats.projects, icon: FolderKanban, tone: "teal", to: "/revisiones" },
+    { label: "Artículos", value: data.stats.articles, icon: BookOpen, tone: "blue", to: "/biblioteca" },
+    { label: "Preguntas RQ", value: data.stats.researchQuestions, icon: ListTree, tone: "violet", to: "/protocolo" },
+    { label: "Evidencias", value: data.stats.evidenceSpans, icon: FileCheck2, tone: "amber", to: "/evidencia" },
+    { label: "Valores por revisar", value: data.stats.valuesToReview, icon: Sparkles, tone: "amber", to: "/evidencia" },
+    { label: "Tareas en curso", value: data.stats.activeJobs, icon: ListChecks, tone: "teal", to: "/tareas" },
   ] as const;
 
   return (
@@ -39,15 +42,15 @@ export function DashboardPage({ data }: { data: BootstrapData }) {
         </div>
       </section>
 
-      <section className="mt-6 grid grid-cols-4 gap-4">
-        {stats.map(({ label, value, icon: Icon, tone }) => (
-          <article key={label} className="panel flex items-center gap-4 p-5">
+      <section className="mt-6 grid grid-cols-3 gap-4">
+        {stats.map(({ label, value, icon: Icon, tone, to }) => (
+          <Link key={label} to={to} className="panel flex items-center gap-4 p-5 transition hover:border-teal-200">
             <div className={`metric-icon metric-${tone}`}><Icon className="size-5" strokeWidth={1.8} /></div>
             <div>
               <p className="text-2xl font-semibold tracking-[-0.03em] text-slate-900">{value}</p>
               <p className="text-xs font-medium text-slate-400">{label}</p>
             </div>
-          </article>
+          </Link>
         ))}
       </section>
 

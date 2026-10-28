@@ -28,6 +28,15 @@ export function useResearchPilot() {
     void refresh();
   }, [refresh]);
 
+  // Background refresh that keeps the current screen instead of showing the loader.
+  const refreshQuietly = useCallback(async () => {
+    try {
+      setData(await backend.bootstrap());
+    } catch {
+      // A failed background refresh keeps the last good data.
+    }
+  }, []);
+
   const createProject = async (input: CreateProjectInput) => {
     await backend.createProject(input);
     await refresh();
@@ -78,6 +87,7 @@ export function useResearchPilot() {
     loading,
     error,
     refresh,
+    refreshQuietly,
     createProject,
     saveSettings,
     importPdfFiles,

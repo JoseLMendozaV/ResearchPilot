@@ -601,7 +601,7 @@ fn pdf_year(value: &str) -> Option<i64> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use lopdf::{
         Object, Stream,
         content::{Content, Operation},
@@ -611,7 +611,7 @@ mod tests {
 
     use super::*;
 
-    fn create_pdf(path: &Path) {
+    pub(crate) fn create_pdf(path: &Path) {
         let mut document = Document::with_version("1.5");
         let pages_id = document.new_object_id();
         let font_id = document.add_object(dictionary! {

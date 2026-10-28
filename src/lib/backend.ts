@@ -1,13 +1,22 @@
 import { invoke } from "@tauri-apps/api/core";
 import type {
+  AddMasterValueInput,
   AppSettings,
+  ArticleExtraction,
   BootstrapData,
   CreateProjectInput,
+  EnqueueResult,
+  EvidenceListItem,
+  ExtractorStatus,
   ImportItemResult,
+  JobSummary,
   LibraryArticle,
   LibraryCollection,
+  MasterValue,
   ReviewProject,
   UpdateArticleMetadataInput,
+  UpdateMasterValueInput,
+  ValueRevision,
 } from "../types";
 
 export const backend = {
@@ -30,6 +39,25 @@ export const backend = {
     invoke<LibraryCollection>("create_library_collection", { name }),
   setArticleCollection: (articleId: string, collectionId: string, included: boolean) =>
     invoke<void>("set_article_collection", { articleId, collectionId, included }),
+  extractorStatus: () => invoke<ExtractorStatus>("extractor_status"),
+  prepareExtractorEnvironment: () => invoke<JobSummary>("prepare_extractor_environment"),
+  enqueueExtraction: (articleIds: string[], force: boolean) =>
+    invoke<EnqueueResult[]>("enqueue_extraction", { articleIds, force }),
+  enqueuePendingExtractions: () => invoke<EnqueueResult[]>("enqueue_pending_extractions"),
+  listJobs: (limit = 200) => invoke<JobSummary[]>("list_jobs", { limit }),
+  pauseJob: (jobId: string) => invoke<JobSummary>("pause_job", { jobId }),
+  resumeJob: (jobId: string) => invoke<JobSummary>("resume_job", { jobId }),
+  cancelJob: (jobId: string) => invoke<JobSummary>("cancel_job", { jobId }),
+  retryJob: (jobId: string) => invoke<JobSummary>("retry_job", { jobId }),
+  articleExtraction: (articleId: string) =>
+    invoke<ArticleExtraction>("get_article_extraction", { articleId }),
+  updateMasterValue: (input: UpdateMasterValueInput) =>
+    invoke<MasterValue>("update_master_value", { input }),
+  addMasterValue: (input: AddMasterValueInput) => invoke<MasterValue>("add_master_value", { input }),
+  masterValueHistory: (valueId: string) => invoke<ValueRevision[]>("master_value_history", { valueId }),
+  revertMasterValue: (valueId: string, revisionNumber: number) =>
+    invoke<MasterValue>("revert_master_value", { valueId, revisionNumber }),
+  recentEvidence: (limit = 200) => invoke<EvidenceListItem[]>("list_recent_evidence", { limit }),
 };
 
 export function errorMessage(error: unknown): string {

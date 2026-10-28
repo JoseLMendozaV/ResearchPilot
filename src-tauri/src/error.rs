@@ -11,6 +11,8 @@ pub enum AppError {
     Validation(String),
     #[error("No se pudo inicializar la aplicación: {0}")]
     Initialization(String),
+    #[error("Extractor: {0}")]
+    Worker(String),
 }
 
 impl Serialize for AppError {

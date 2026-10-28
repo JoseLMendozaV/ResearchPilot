@@ -24,6 +24,12 @@ erDiagram
     REVIEWERS ||--o{ SCREENING_DECISIONS : decide
     REVIEWERS ||--o{ REVIEWER_CONFLICTS : resuelve
     REVIEW_PROJECTS ||--o{ AUDIT_EVENTS : audita
+    MASTER_RECORD_FIELDS ||--o{ MASTER_RECORD_VALUES : tipa
+    ARTICLES ||--o{ MASTER_RECORD_VALUES : ficha
+    MASTER_RECORD_VALUES ||--o{ MASTER_RECORD_VALUE_REVISIONS : historial
+    MASTER_RECORD_VALUES }o--o{ EVIDENCE_SPANS : MASTER_VALUE_EVIDENCE
+    EXTRACTION_RUNS ||--o{ MASTER_RECORD_VALUES : propone
+    INGESTION_JOBS ||--o| EXTRACTION_RUNS : ejecuta
 ```
 
 ## Límites de agregado
@@ -41,3 +47,10 @@ erDiagram
 - Eliminación lógica para objetos principales; las eliminaciones físicas internas se reservan para mantenimiento explícito.
 - Los valores extraídos no son únicos por artículo/campo: pueden coexistir mediciones, configuraciones y contradicciones.
 - La evidencia contiene documento, página, sección, cita y localizador JSON para bounding box cuando esté disponible.
+
+## Ficha maestra (Fase 3)
+
+- `master_record_fields` es el catálogo global (no depende de una revisión); `extraction_fields` sigue siendo el esquema por proyecto/RQ de la Fase 6.
+- `master_record_values` admite varios valores por campo; `superseded_by_run_id` oculta propuestas no revisadas de ejecuciones anteriores sin borrarlas.
+- `master_record_value_revisions` es inmutable: editar o restaurar crea una revisión nueva.
+- `not_reported` exige origen humano o revisor (restricción `CHECK`); `not_found` lo usa solo el extractor.

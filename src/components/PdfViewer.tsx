@@ -3,14 +3,25 @@ import { convertFileSrc } from "@tauri-apps/api/core";
 import { ChevronLeft, ChevronRight, LoaderCircle, Minus, Plus } from "lucide-react";
 import * as pdfjs from "pdfjs-dist";
 import workerSrc from "pdfjs-dist/build/pdf.worker.min.mjs?url";
+import type { ViewerFocus } from "../types";
 
 pdfjs.GlobalWorkerOptions.workerSrc = workerSrc;
 
-export function PdfViewer({ path, title }: { path: string; title: string }) {
+interface Rendered {
+  page: number;
+  width: number;
+  height: number;
+  /** Page width in PDF points, used when evidence has no page size. */
+  baseWidth: number;
+}
+
+export function PdfViewer({ path, title, focus }: { path: string; title: string; focus?: ViewerFocus }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const highlightRef = useRef<HTMLDivElement>(null);
   const [document, setDocument] = useState<pdfjs.PDFDocumentProxy | null>(null);
   const [page, setPage] = useState(1);
   const [scale, setScale] = useState(1.15);
+  const [rendered, setRendered] = useState<Rendered | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -38,6 +49,11 @@ export function PdfViewer({ path, title }: { path: string; title: string }) {
   }, [path]);
 
   useEffect(() => {
+    if (!focus || !document) return;
+    setPage(Math.min(Math.max(1, focus.page), document.numPages));
+  }, [focus, document]);
+
+  useEffect(() => {
     if (!document || !canvasRef.current) return;
     let active = true;
     let renderTask: pdfjs.RenderTask | undefined;
@@ -53,7 +69,9 @@ export function PdfViewer({ path, title }: { path: string; title: string }) {
       canvas.style.width = `${Math.floor(viewport.width)}px`;
       canvas.style.height = `${Math.floor(viewport.height)}px`;
       renderTask = pdfPage.render({ canvas, canvasContext: context, viewport, transform: ratio === 1 ? undefined : [ratio, 0, 0, ratio, 0, 0] });
-      return renderTask.promise;
+      return renderTask.promise.then(() => {
+        if (active) setRendered({ page, width: viewport.width, height: viewport.height, baseWidth: pdfPage.getViewport({ scale: 1 }).width });
+      });
     }).catch((cause: unknown) => {
       if (active && !(cause instanceof pdfjs.RenderingCancelledException)) {
         setError(cause instanceof Error ? cause.message : "No se pudo renderizar la página");
@@ -64,6 +82,17 @@ export function PdfViewer({ path, title }: { path: string; title: string }) {
       renderTask?.cancel();
     };
   }, [document, page, scale]);
+
+  // Evidence boxes are PDF points from the top-left corner (pdfplumber convention).
+  const box = focus?.bbox && rendered && rendered.page === focus.page ? (() => {
+    const factor = rendered.width / (focus.pageWidth || rendered.baseWidth);
+    const [x0, top, x1, bottom] = focus.bbox;
+    return { left: x0 * factor - 3, top: top * factor - 3, width: (x1 - x0) * factor + 6, height: (bottom - top) * factor + 6 };
+  })() : null;
+
+  useEffect(() => {
+    if (box) highlightRef.current?.scrollIntoView({ block: "center", behavior: "smooth" });
+  }, [box?.left, box?.top, focus?.key]);
 
   if (loading) return <div className="grid h-full place-items-center"><div className="text-center"><LoaderCircle className="mx-auto size-6 animate-spin text-teal-600" /><p className="mt-2 text-xs text-slate-400">Abriendo documento local…</p></div></div>;
   if (error) return <div className="grid h-full place-items-center p-8 text-center text-sm text-rose-600">{error}</div>;
@@ -84,7 +113,18 @@ export function PdfViewer({ path, title }: { path: string; title: string }) {
         </div>
       </div>
       <div className="min-h-0 flex-1 overflow-auto bg-slate-200/70 p-6">
-        <canvas ref={canvasRef} className="mx-auto bg-white shadow-lg" aria-label={`Página ${page} de ${title}`} />
+        <div className="relative mx-auto w-fit">
+          <canvas ref={canvasRef} className="bg-white shadow-lg" aria-label={`Página ${page} de ${title}`} />
+          {box && (
+            <div
+              ref={highlightRef}
+              key={focus?.key}
+              className="evidence-highlight pointer-events-none absolute rounded-sm border-2 border-amber-500 bg-amber-300/25"
+              style={box}
+              aria-label="Evidencia resaltada"
+            />
+          )}
+        </div>
       </div>
     </div>
   );
