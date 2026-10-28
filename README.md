@@ -49,6 +49,18 @@ npm run build
 (cd python && PYTHONPATH=. .venv/bin/python -B -m unittest discover -s tests -p 'test_*.py')
 ```
 
+## Instalar desde GitHub Releases
+
+1. Descarga `ResearchPilot_<versión>_aarch64.dmg` de [Releases](https://github.com/JoseLMendozaV/ResearchPilot/releases/latest) y arrastra la app a Aplicaciones.
+2. La app tiene firma *ad hoc*: no está firmada con un certificado Developer ID de Apple ni notarizada. La primera vez macOS avisa de que no puede verificar al desarrollador. Abre **Ajustes del Sistema → Privacidad y seguridad** y pulsa **Abrir igualmente** junto al aviso de ResearchPilot.
+3. Si aun así aparece «está dañado y no se puede abrir» (versiones anteriores a la 0.9.1), quita la marca de cuarentena después de copiar la app:
+
+   ```bash
+   xattr -dr com.apple.quarantine /Applications/ResearchPilot.app
+   ```
+
+Las actualizaciones posteriores se instalan desde la propia app (Configuración → Actualizaciones) y no repiten este paso.
+
 ## Construir la aplicación
 
 ```bash

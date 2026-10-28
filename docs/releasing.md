@@ -38,6 +38,12 @@ El script genera en `dist-release/vX.Y.Z/`:
 
 El release publicado debe quedar marcado como *latest* para que `releases/latest/download/latest.json` apunte a él.
 
+## Firma de código en macOS
+
+- `bundle.macOS.signingIdentity = "-"` firma el paquete `.app` completo con firma *ad hoc* y runtime reforzado. Sin ella, solo el binario lleva la firma del enlazador y macOS declara «dañada» la app descargada (con atributo de cuarentena).
+- `scripts/release.sh` ejecuta `codesign --verify --deep --strict` sobre la app compilada y sobre la copia dentro del DMG, y aborta si la firma no es válida.
+- La firma *ad hoc* no evita el aviso de desarrollador no identificado. Para eliminarlo hacen falta un certificado **Developer ID Application** (Apple Developer Program) y la **notarización**: `signingIdentity` con ese certificado más `APPLE_ID`, `APPLE_PASSWORD` y `APPLE_TEAM_ID` en el entorno del build.
+
 ## Comportamiento en la app
 
 - Configuración → Actualizaciones → **Buscar actualizaciones**: muestra versión y notas; descarga, verifica e instala solo tras confirmar; luego ofrece reiniciar.

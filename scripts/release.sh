@@ -34,6 +34,18 @@ DMG="$BUNDLE/dmg/ResearchPilot_${VERSION}_aarch64.dmg"
 ARCHIVE="$BUNDLE/macos/ResearchPilot.app.tar.gz"
 test -f "$DMG" && test -f "$ARCHIVE" && test -f "$ARCHIVE.sig" || { echo "Faltan artefactos del build (¿createUpdaterArtifacts?)" >&2; exit 1; }
 
+# Without a valid bundle signature macOS reports downloaded copies as "damaged".
+verify_app() {
+  codesign --verify --deep --strict "$1" || { echo "Firma de código inválida en $1" >&2; exit 1; }
+}
+verify_app "$BUNDLE/macos/ResearchPilot.app"
+MOUNT="$(mktemp -d)"
+hdiutil attach -nobrowse -readonly -mountpoint "$MOUNT" "$DMG" >/dev/null
+trap 'hdiutil detach "$MOUNT" >/dev/null 2>&1 || true' EXIT
+verify_app "$MOUNT/ResearchPilot.app"
+hdiutil detach "$MOUNT" >/dev/null
+trap - EXIT
+
 rm -rf "$OUT" && mkdir -p "$OUT"
 cp "$DMG" "$OUT/"
 cp "$ARCHIVE" "$OUT/ResearchPilot_${VERSION}_aarch64.app.tar.gz"
