@@ -15,6 +15,7 @@ const formats: { format: ExportFormat; title: string; detail: string; extension:
   { format: "bibtex", title: "BibTeX", detail: "Bibliografía para LaTeX, con caracteres especiales escapados.", extension: "bib", scoped: true },
   { format: "markdown", title: "Markdown", detail: "Informe con cadenas, incluidos, tablas por RQ y anexo de evidencias.", extension: "md" },
   { format: "latex", title: "LaTeX", detail: "Documento con tablas por RQ (longtable), incluidos y anexo de evidencias.", extension: "tex" },
+  { format: "prisma", title: "Diagrama PRISMA 2020 (SVG)", detail: "Flujo con conteos derivados de los eventos registrados; marcado como provisional si hay pendientes.", extension: "svg" },
 ];
 
 export function ExportTab({ projectId, projectName }: { projectId: string; projectName: string }) {
@@ -56,7 +57,7 @@ export function ExportTab({ projectId, projectName }: { projectId: string; proje
           </p>
         )}
         <div className="mt-3"><ErrorNote message={action.error} /></div>
-        <p className="mt-3 text-[11px] leading-4 text-slate-400">El formato compatible usa contenido propio de ResearchPilot y las cabeceras del formato; no redistribuye la plantilla original. Los valores rechazados no se exportan y los estados sin valor se escriben explícitamente (por ejemplo, «No reportado»). PRISMA se exportará en la Fase 8.</p>
+        <p className="mt-3 text-[11px] leading-4 text-slate-400">El formato compatible usa contenido propio de ResearchPilot y las cabeceras del formato; no redistribuye la plantilla original. Los valores rechazados no se exportan y los estados sin valor se escriben explícitamente (por ejemplo, «No reportado»). El informe Markdown y el JSON incluyen los conteos PRISMA.</p>
       </Card>
       <Card title="Historial de exportaciones">
         {history.data?.length ? (

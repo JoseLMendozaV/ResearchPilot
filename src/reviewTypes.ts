@@ -369,7 +369,7 @@ export interface AuditEntry {
   createdAt: string;
 }
 
-export type ExportFormat = "xlsx" | "csv" | "json" | "ris" | "bibtex" | "markdown" | "latex";
+export type ExportFormat = "xlsx" | "csv" | "json" | "ris" | "bibtex" | "markdown" | "latex" | "prisma";
 
 export interface ExportRequest {
   projectId: string;
@@ -395,4 +395,62 @@ export interface ExportRecord {
   outputSha256?: string;
   options: { variant?: string; scope?: string; appVersion?: string; protocolVersion?: number };
   createdAt: string;
+}
+
+export interface PrismaCounts {
+  databases: { source: string; records: number }[];
+  recordsFromDatabases: number;
+  recordsFromOtherSources: number;
+  duplicatesRemoved: number;
+  removedOtherReasons: number;
+  recordsScreened: number;
+  recordsExcluded: number;
+  screeningPending: number;
+  reportsSought: number;
+  reportsNotRetrieved: number;
+  reportsAssessed: number;
+  reportsExcluded: number;
+  exclusionReasons: { reason: string; reports: number }[];
+  fullTextPending: number;
+  studiesIncluded: number;
+  secondaryStudies: number;
+  issues: string[];
+  complete: boolean;
+}
+
+export interface Frequency {
+  value: string;
+  count: number;
+  studies: number[];
+}
+
+export interface FieldSynthesis {
+  fieldId: string;
+  group: string;
+  name: string;
+  dataType: string;
+  studiesWithData: number;
+  unverifiedValues: number;
+  frequencies: Frequency[];
+  numeric: { unit: string; n: number; min: number; max: number; median: number; values: [number, number][] }[];
+  warnings: string[];
+}
+
+export interface Synthesis {
+  included: number;
+  byYear: Frequency[];
+  byVenue: Frequency[];
+  bySource: Frequency[];
+  fields: FieldSynthesis[];
+}
+
+export type DraftSection = "methods" | "results" | "limitations";
+
+export interface Draft {
+  section: DraftSection;
+  content: string;
+  generatedContent: string;
+  edited: boolean;
+  generatedAt: string;
+  updatedAt: string;
 }

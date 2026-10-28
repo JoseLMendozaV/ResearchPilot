@@ -58,6 +58,11 @@ const MIGRATIONS: &[(i64, &str, &str)] = &[
         "update check preference",
         include_str!("../migrations/0009_updates.sql"),
     ),
+    (
+        10,
+        "synthesis drafts",
+        include_str!("../migrations/0010_synthesis.sql"),
+    ),
 ];
 const REVIEW_TYPES: [&str; 3] = ["systematic_review", "systematic_mapping", "scoping_review"];
 

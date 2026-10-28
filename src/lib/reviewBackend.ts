@@ -10,12 +10,15 @@ import type {
   CriterionInput,
   Decision,
   DecisionInput,
+  Draft,
+  DraftSection,
   ExportRecord,
   ExportRequest,
   ExportResult,
   ExtractionMatrix,
   FieldInput,
   Phase,
+  PrismaCounts,
   ProjectSettingsInput,
   ProjectWorkspace,
   ProtocolVersion,
@@ -30,6 +33,7 @@ import type {
   SearchStrategy,
   StrategyImportResult,
   StrategyInput,
+  Synthesis,
 } from "../reviewTypes";
 
 export const reviewBackend = {
@@ -75,4 +79,10 @@ export const reviewBackend = {
   audit: (projectId: string, limit = 300) => invoke<AuditEntry[]>("project_audit", { projectId, limit }),
   exportProject: (request: ExportRequest) => invoke<ExportResult>("export_project", { request }),
   exportHistory: (projectId: string) => invoke<ExportRecord[]>("export_history", { projectId }),
+  prismaCounts: (projectId: string) => invoke<PrismaCounts>("prisma_counts", { projectId }),
+  prismaSvg: (projectId: string) => invoke<string>("prisma_svg", { projectId }),
+  synthesis: (projectId: string) => invoke<Synthesis>("project_synthesis", { projectId }),
+  drafts: (projectId: string) => invoke<Draft[]>("synthesis_drafts", { projectId }),
+  generateDraft: (projectId: string, section: DraftSection) => invoke<Draft[]>("generate_draft", { projectId, section }),
+  saveDraft: (projectId: string, section: DraftSection, content: string) => invoke<Draft[]>("save_draft", { projectId, section, content }),
 };

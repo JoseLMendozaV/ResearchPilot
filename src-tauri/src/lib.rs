@@ -16,6 +16,7 @@ mod rag;
 mod review;
 mod screening;
 mod secrets;
+mod synthesis;
 mod worker;
 
 use std::{
@@ -896,6 +897,58 @@ fn export_history(
 }
 
 #[tauri::command]
+fn prisma_counts(
+    database: State<'_, Database>,
+    project_id: String,
+) -> AppResult<synthesis::PrismaCounts> {
+    database.prisma_counts(&project_id)
+}
+
+#[tauri::command]
+fn prisma_svg(database: State<'_, Database>, project_id: String) -> AppResult<String> {
+    let name = database.project_workspace(&project_id)?.project.name;
+    Ok(synthesis::prisma_svg(
+        &database.prisma_counts(&project_id)?,
+        &name,
+    ))
+}
+
+#[tauri::command]
+fn project_synthesis(
+    database: State<'_, Database>,
+    project_id: String,
+) -> AppResult<synthesis::Synthesis> {
+    database.synthesis(&project_id)
+}
+
+#[tauri::command]
+fn synthesis_drafts(
+    database: State<'_, Database>,
+    project_id: String,
+) -> AppResult<Vec<synthesis::Draft>> {
+    database.drafts(&project_id)
+}
+
+#[tauri::command]
+fn generate_draft(
+    database: State<'_, Database>,
+    project_id: String,
+    section: String,
+) -> AppResult<Vec<synthesis::Draft>> {
+    database.generate_draft(&project_id, &section)
+}
+
+#[tauri::command]
+fn save_draft(
+    database: State<'_, Database>,
+    project_id: String,
+    section: String,
+    content: String,
+) -> AppResult<Vec<synthesis::Draft>> {
+    database.save_draft(&project_id, &section, &content)
+}
+
+#[tauri::command]
 fn list_master_fields(database: State<'_, Database>) -> AppResult<Vec<models::MasterField>> {
     database.master_fields()
 }
@@ -1049,7 +1102,13 @@ pub fn run() {
             project_audit,
             list_master_fields,
             export_project,
-            export_history
+            export_history,
+            prisma_counts,
+            prisma_svg,
+            project_synthesis,
+            synthesis_drafts,
+            generate_draft,
+            save_draft
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

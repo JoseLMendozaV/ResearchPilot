@@ -16,6 +16,7 @@ import { QualityTab } from "./review/QualityTab";
 import { QuestionsTab } from "./review/QuestionsTab";
 import { ScreeningTab } from "./review/ScreeningTab";
 import { SearchTab } from "./review/SearchTab";
+import { SynthesisTab } from "./review/SynthesisTab";
 import { ErrorNote, Loading, useLoad } from "./review/shared";
 
 const tabs = [
@@ -28,6 +29,7 @@ const tabs = [
   { key: "screening", label: "I/E" },
   { key: "quality", label: "Calidad" },
   { key: "extraction", label: "Extracción" },
+  { key: "synthesis", label: "Síntesis y PRISMA" },
   { key: "conflicts", label: "Conflictos" },
   { key: "export", label: "Exportar" },
   { key: "audit", label: "Auditoría" },
@@ -84,6 +86,7 @@ export function ProjectWorkspacePage({ articles }: { articles: LibraryArticle[] 
         {tab === "quality" && <QualityTab projectId={projectId} onChange={refresh} />}
         {tab === "extraction" && <ExtractionTab projectId={projectId} />}
         {tab === "conflicts" && <ConflictsTab projectId={projectId} onChange={refresh} onOpenQuality={() => setTab("quality")} />}
+        {tab === "synthesis" && <SynthesisTab projectId={projectId} projectName={data.project.name} />}
         {tab === "export" && <ExportTab projectId={projectId} projectName={data.project.name} />}
         {tab === "audit" && <AuditTab projectId={projectId} />}
       </div>

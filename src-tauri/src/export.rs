@@ -27,6 +27,7 @@ use crate::{
         active_reviewer, audit,
     },
     screening::{ScreeningRow, ScreeningTable},
+    synthesis::{PrismaCounts, prisma_svg},
 };
 
 pub const SNAPSHOT_FORMAT: &str = "researchpilot-project-export/1";
@@ -83,6 +84,7 @@ pub struct ProjectSnapshot {
     pub screening_full_text: ScreeningTable,
     pub quality: QualityTable,
     pub matrix: ExtractionMatrix,
+    pub prisma: PrismaCounts,
     pub audit: Vec<AuditEntry>,
 }
 
@@ -95,6 +97,7 @@ fn extension(format: &str) -> AppResult<&'static str> {
         "bibtex" => "bib",
         "markdown" => "md",
         "latex" => "tex",
+        "prisma" => "svg",
         _ => {
             return Err(AppError::Validation(
                 "Formato de exportación no reconocido".into(),
@@ -121,6 +124,7 @@ impl Database {
             screening_full_text: self.screening_table(project_id, "full_text")?,
             quality: self.quality_table(project_id)?,
             matrix: self.extraction_matrix(project_id, false)?,
+            prisma: self.prisma_counts(project_id)?,
             audit: self.project_audit(project_id, 2000)?,
         })
     }
@@ -185,6 +189,15 @@ impl Database {
                 &path,
                 &latex(&snapshot),
                 "Informe LaTeX con anexo de evidencias",
+            )?,
+            "prisma" => write_text(
+                &path,
+                &prisma_svg(&snapshot.prisma, &snapshot.workspace.project.name),
+                if snapshot.prisma.issues.is_empty() && snapshot.prisma.complete {
+                    "Diagrama PRISMA 2020 (SVG)"
+                } else {
+                    "Diagrama PRISMA 2020 provisional (SVG): revisa las advertencias"
+                },
             )?,
             _ => unreachable!("validated above"),
         };
@@ -1259,6 +1272,41 @@ fn markdown(snapshot: &ProjectSnapshot) -> String {
         "## Resumen\n\n| Corpus | Elegibles | Incluidos | Excluidos |\n|---|---|---|---|\n| {} | {} | {} | {} |\n",
         counts.total, counts.eligible, counts.included, counts.excluded
     );
+    let prisma = &snapshot.prisma;
+    let _ = writeln!(
+        output,
+        "## Flujo PRISMA 2020\n\n| Etapa | n |\n|---|---|\n| Registros en bases de datos | {} |\n| Registros de otras fuentes | {} |\n| Duplicados eliminados | {} |\n| Eliminados por otros motivos | {} |\n| Registros cribados | {} |\n| Registros excluidos | {} |\n| Informes buscados | {} |\n| Informes no recuperados | {} |\n| Informes evaluados | {} |\n| Informes excluidos | {} |\n| Estudios incluidos | {} |\n",
+        prisma.records_from_databases,
+        prisma.records_from_other_sources,
+        prisma.duplicates_removed,
+        prisma.removed_other_reasons,
+        prisma.records_screened,
+        prisma.records_excluded,
+        prisma.reports_sought,
+        prisma.reports_not_retrieved,
+        prisma.reports_assessed,
+        prisma.reports_excluded,
+        prisma.studies_included
+    );
+    for reason in &prisma.exclusion_reasons {
+        let _ = writeln!(
+            output,
+            "- Excluidos por «{}»: {}",
+            md_cell(&reason.reason),
+            reason.reports
+        );
+    }
+    if !prisma.complete {
+        let _ = writeln!(
+            output,
+            "\n> Provisional: {} registro(s) pendientes de cribado y {} de texto completo.",
+            prisma.screening_pending, prisma.full_text_pending
+        );
+    }
+    for issue in &prisma.issues {
+        let _ = writeln!(output, "\n> Advertencia de contabilidad: {issue}");
+    }
+    output.push('\n');
     if !snapshot.strategies.is_empty() {
         let _ = writeln!(
             output,
