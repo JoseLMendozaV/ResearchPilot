@@ -3,6 +3,7 @@ mod ai_gateway;
 mod bibliography;
 mod db;
 mod error;
+mod export;
 mod extraction;
 mod indexing;
 mod jobs;
@@ -876,6 +877,25 @@ fn prefill_matrix_from_master(database: State<'_, Database>, project_id: String)
 }
 
 #[tauri::command]
+async fn export_project(
+    database: State<'_, Database>,
+    request: export::ExportRequest,
+) -> AppResult<export::ExportResult> {
+    let database = database.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || database.export_project(request))
+        .await
+        .map_err(|error| AppError::Validation(error.to_string()))?
+}
+
+#[tauri::command]
+fn export_history(
+    database: State<'_, Database>,
+    project_id: String,
+) -> AppResult<Vec<export::ExportRecord>> {
+    database.export_history(&project_id)
+}
+
+#[tauri::command]
 fn list_master_fields(database: State<'_, Database>) -> AppResult<Vec<models::MasterField>> {
     database.master_fields()
 }
@@ -1027,7 +1047,9 @@ pub fn run() {
             save_extraction_value,
             prefill_matrix_from_master,
             project_audit,
-            list_master_fields
+            list_master_fields,
+            export_project,
+            export_history
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

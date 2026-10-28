@@ -546,7 +546,7 @@ fn protocol_snapshot(connection: &Connection, project_id: &str) -> AppResult<Val
     Ok(json!({
         "researchQuestions": rows("SELECT code, question, objective, category FROM research_questions WHERE project_id = ?1 ORDER BY display_order, code")?,
         "extractionFields": rows("SELECT f.name, f.data_type, f.required, q.code AS rq FROM extraction_fields f LEFT JOIN research_questions q ON q.id = f.research_question_id WHERE f.project_id = ?1 AND f.deleted_at IS NULL ORDER BY f.display_order")?,
-        "eligibilityCriteria": rows("SELECT criterion_type, code, name, description FROM eligibility_criteria WHERE project_id = ?1 AND active = 1 ORDER BY criterion_type, display_order")?,
+        "eligibilityCriteria": rows("SELECT criterion_type, code, name, description FROM eligibility_criteria WHERE project_id = ?1 AND active = 1 ORDER BY CASE criterion_type WHEN 'inclusion' THEN 0 ELSE 1 END, display_order")?,
         "qualityCriteria": rows("SELECT code, question, weight, max_score, scale_json FROM quality_criteria WHERE project_id = ?1 ORDER BY display_order")?,
         "searchStrategies": rows("SELECT database_name, query_text, query_date, result_count, version_number FROM search_strategies WHERE project_id = ?1 AND deleted_at IS NULL ORDER BY database_name, version_number")?,
     }))

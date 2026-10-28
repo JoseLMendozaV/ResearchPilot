@@ -464,7 +464,8 @@ impl Database {
 
 fn criteria(connection: &Connection, project_id: &str) -> AppResult<Vec<Criterion>> {
     let mut statement = connection.prepare(
-        "SELECT id, criterion_type, code, name, description, active FROM eligibility_criteria WHERE project_id = ?1 ORDER BY criterion_type, display_order",
+        "SELECT id, criterion_type, code, name, description, active FROM eligibility_criteria WHERE project_id = ?1
+         ORDER BY CASE criterion_type WHEN 'inclusion' THEN 0 ELSE 1 END, display_order",
     )?;
     Ok(statement
         .query_map([project_id], |row| {

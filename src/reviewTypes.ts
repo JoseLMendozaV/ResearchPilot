@@ -368,3 +368,31 @@ export interface AuditEntry {
   after?: unknown;
   createdAt: string;
 }
+
+export type ExportFormat = "xlsx" | "csv" | "json" | "ris" | "bibtex" | "markdown" | "latex";
+
+export interface ExportRequest {
+  projectId: string;
+  format: ExportFormat;
+  variant?: "compatible" | "extended";
+  scope?: "included" | "corpus";
+  path: string;
+}
+
+export interface ExportResult {
+  id: string;
+  path: string;
+  format: ExportFormat;
+  bytes: number;
+  sha256: string;
+  summary: string;
+}
+
+export interface ExportRecord {
+  id: string;
+  format: ExportFormat;
+  outputPath: string;
+  outputSha256?: string;
+  options: { variant?: string; scope?: string; appVersion?: string; protocolVersion?: number };
+  createdAt: string;
+}

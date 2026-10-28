@@ -7,6 +7,7 @@ import type { LibraryArticle } from "../types";
 import { AuditTab } from "./review/AuditTab";
 import { ConflictsTab } from "./review/ConflictsTab";
 import { ControlTab } from "./review/ControlTab";
+import { ExportTab } from "./review/ExportTab";
 import { ExtractionTab } from "./review/ExtractionTab";
 import { GuideContent } from "./review/GuideContent";
 import { OverviewTab } from "./review/OverviewTab";
@@ -28,6 +29,7 @@ const tabs = [
   { key: "quality", label: "Calidad" },
   { key: "extraction", label: "Extracción" },
   { key: "conflicts", label: "Conflictos" },
+  { key: "export", label: "Exportar" },
   { key: "audit", label: "Auditoría" },
 ] as const;
 
@@ -82,6 +84,7 @@ export function ProjectWorkspacePage({ articles }: { articles: LibraryArticle[] 
         {tab === "quality" && <QualityTab projectId={projectId} onChange={refresh} />}
         {tab === "extraction" && <ExtractionTab projectId={projectId} />}
         {tab === "conflicts" && <ConflictsTab projectId={projectId} onChange={refresh} onOpenQuality={() => setTab("quality")} />}
+        {tab === "export" && <ExportTab projectId={projectId} projectName={data.project.name} />}
         {tab === "audit" && <AuditTab projectId={projectId} />}
       </div>
     </div>

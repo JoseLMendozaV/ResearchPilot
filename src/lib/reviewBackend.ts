@@ -10,6 +10,9 @@ import type {
   CriterionInput,
   Decision,
   DecisionInput,
+  ExportRecord,
+  ExportRequest,
+  ExportResult,
   ExtractionMatrix,
   FieldInput,
   Phase,
@@ -70,4 +73,6 @@ export const reviewBackend = {
   saveCell: (input: CellInput) => invoke<CellValue[]>("save_extraction_value", { input }),
   prefillMatrix: (projectId: string) => invoke<number>("prefill_matrix_from_master", { projectId }),
   audit: (projectId: string, limit = 300) => invoke<AuditEntry[]>("project_audit", { projectId, limit }),
+  exportProject: (request: ExportRequest) => invoke<ExportResult>("export_project", { request }),
+  exportHistory: (projectId: string) => invoke<ExportRecord[]>("export_history", { projectId }),
 };

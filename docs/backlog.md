@@ -11,7 +11,7 @@ Cada fase exige compilación, pruebas pertinentes, regresión de fases anteriore
 | 4 — Ollama y RAG ✅ | Ollama detectado, interfaz vectorial | Cumplido (probado con servidor simulado): descubrimiento de modelos; LLM/embedding separados; FTS5+vector; respuestas con citas navegables; “no encontrado” sin invención |
 | 5 — AI Gateway ✅ | Keychain, API oficiales | Cumplido (probado con servidores simulados): OpenAI/Anthropic opt-in por tarea; prueba de conexión; confirmación de envío; tokens/coste registrados; modo sin red verificable |
 | 6 — Metodología SLR ✅ | Biblioteca estable | Cumplido: CRUD completo de Leer/Control/RQs/Cadena/I_E/Calidad/Extraccion; protocolo versionado; doble revisión y conflictos; auditoría |
-| 7 — Matrices/exportación | Datos validados Fase 6 | XLSX de siete hojas compatible; versión ampliada; CSV/JSON/RIS/BibTeX/Markdown/LaTeX; celdas enlazan procedencia |
+| 7 — Matrices/exportación ✅ | Datos validados Fase 6 | Cumplido: XLSX de siete hojas compatible; versión ampliada; CSV/JSON/RIS/BibTeX/Markdown/LaTeX; celdas enlazan procedencia |
 | 8 — Síntesis y PRISMA | Eventos SLR consistentes | Conteos derivados y validados; diagrama exportable; tablas descriptivas; borradores solo con datos verificados y citas |
 | 9 — Intercambio/expansión | Formato portable y backups | Paquetes entre revisores, recuperación probada, Zotero futuro, rendimiento con corpus grande y preparación Win/Linux |
 

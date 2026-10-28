@@ -49,7 +49,7 @@ export function ProtocolPage() {
         </div>
       </div>
       <div className="mt-5 rounded-xl border border-slate-200 bg-white px-4 py-3 text-xs leading-5 text-slate-500">
-        La exportación al libro de Excel con las siete hojas y la versión ampliada con procedencia pertenecen a la Fase 7.
+        Desde la pestaña Exportar de cada revisión se genera el libro de Excel con las siete hojas (formato compatible) o la versión ampliada con procedencia, además de CSV, JSON, RIS, BibTeX, Markdown y LaTeX.
       </div>
       <div className="mt-6"><GuideContent /></div>
     </div>

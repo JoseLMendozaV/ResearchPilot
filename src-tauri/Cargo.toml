@@ -1,6 +1,6 @@
 [package]
 name = "researchpilot"
-version = "0.6.1"
+version = "0.7.0"
 description = "Local-first evidence management for scientific reviews"
 authors = ["ResearchPilot contributors"]
 edition = "2024"
@@ -34,6 +34,7 @@ ureq = { version = "3.5.0", features = ["json"] }
 keyring = { version = "3", features = ["apple-native", "windows-native"] }
 tauri-plugin-updater = "2"
 tauri-plugin-process = "2"
+rust_xlsxwriter = "0.101"
 
 
 # Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration
@@ -45,4 +46,5 @@ panic = "abort"
 strip = true
 
 [dev-dependencies]
+calamine = "0.37"
 tempfile = "3.27.0"
