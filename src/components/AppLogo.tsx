@@ -1,13 +1,9 @@
+import logoUrl from "../assets/logo.png";
+
 export function AppLogo({ compact = false }: { compact?: boolean }) {
   return (
     <div className="flex items-center gap-3">
-      <div className="grid size-10 shrink-0 place-items-center rounded-xl bg-teal-500 text-white shadow-[0_6px_20px_rgba(20,184,166,0.3)]">
-        <svg aria-hidden="true" viewBox="0 0 32 32" className="size-6" fill="none">
-          <path d="M7 23.5 16 6l9 17.5" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
-          <path d="M10.2 18h11.6M13 23.5h6" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" />
-          <circle cx="16" cy="12" r="2.2" fill="currentColor" />
-        </svg>
-      </div>
+      <img src={logoUrl} alt="" aria-hidden="true" className="size-10 shrink-0 drop-shadow-[0_6px_14px_rgba(30,64,175,0.28)]" draggable={false} />
       {!compact && (
         <div>
           <p className="text-[17px] font-semibold tracking-[-0.02em] text-slate-900">ResearchPilot</p>

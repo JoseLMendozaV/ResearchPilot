@@ -1,3 +1,5 @@
+<p align="center"><img src="docs/logo.png" alt="Logo de ResearchPilot" width="160" /></p>
+
 # ResearchPilot
 
 ResearchPilot es una aplicación de escritorio local-first para administrar evidencia científica y construir revisiones sistemáticas, mapeos sistemáticos y revisiones de alcance con trazabilidad documental.
